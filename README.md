@@ -524,13 +524,13 @@ environment.
 Build the CPU image:
 
 ```bash
-python scripts/sketchformer_codebase_finetune.py --sudo build-image
+python scripts/integrations/sketchformer_codebase_finetune.py --sudo build-image
 ```
 
 Write legacy NumPy-compatible stroke3 chunks from existing stroke5 data:
 
 ```bash
-python scripts/sketchformer_codebase_finetune.py --sudo prepare-data \
+python scripts/integrations/sketchformer_codebase_finetune.py --sudo prepare-data \
   --source-dir data/processed/stroke5 \
   --target-dir data/processed/sketchformer-ready-data/stroke3 \
   --n-chunks 10 \
@@ -543,7 +543,7 @@ plotter has enough validation samples for its fixed grid.
 Evaluate the pretrained continuous checkpoint:
 
 ```bash
-python scripts/sketchformer_codebase_finetune.py --sudo evaluate-reconstruction \
+python scripts/integrations/sketchformer_codebase_finetune.py --sudo evaluate-reconstruction \
   --dataset data/processed/sketchformer-ready-data/stroke3 \
   --output-dir weights/pretrained \
   --model-id cvpr_tform_cont \
@@ -553,7 +553,7 @@ python scripts/sketchformer_codebase_finetune.py --sudo evaluate-reconstruction 
 Fine-tune the continuous checkpoint:
 
 ```bash
-python scripts/sketchformer_codebase_finetune.py --sudo finetune-continuous \
+python scripts/integrations/sketchformer_codebase_finetune.py --sudo finetune-continuous \
   --dataset data/processed/sketchformer-ready-data/stroke3 \
   --output-dir weights/finetuned \
   --run-id anime-continuous-finetune \
@@ -568,7 +568,7 @@ Use `--dry-run` before any launcher command to print the Docker command without
 executing it:
 
 ```bash
-python scripts/sketchformer_codebase_finetune.py --sudo --dry-run finetune-continuous
+python scripts/integrations/sketchformer_codebase_finetune.py --sudo --dry-run finetune-continuous
 ```
 
 Detailed notes live in
@@ -676,7 +676,7 @@ reconstructed = decode_tokens(tokens, codebook)
 | Filter sketches | `python scripts/prepare_data/filter_sketches_by_points.py` | `tts-filter-sketches` |
 | Run main pipeline | `python scripts/run_pipeline.py` | `tts-run-pipeline` |
 | Prepare stroke3 data | `python scripts/prepare_data/prepare_anime_data.py` | `tts-prepare-sketchformer` |
-| Sketchformer codebase fine-tuning | `python scripts/sketchformer_codebase_finetune.py --sudo --dry-run finetune-continuous` | `tts-sketchformer-codebase-finetune --sudo --dry-run finetune-continuous` |
+| Sketchformer codebase fine-tuning | `python scripts/integrations/sketchformer_codebase_finetune.py --sudo --dry-run finetune-continuous` | `tts-sketchformer-codebase-finetune --sudo --dry-run finetune-continuous` |
 | Evaluate ordering | `python scripts/metrics/evaluate_ordering.py --samples 20` | `tts-evaluate-ordering --samples 20` |
 | Evaluate encoder | `python scripts/metrics/evaluate_encoder.py` | `tts-evaluate-encoder` |
 | Compare RDP epsilon | `python scripts/metrics/compare_rdp_epsilon.py` | `tts-compare-rdp` |

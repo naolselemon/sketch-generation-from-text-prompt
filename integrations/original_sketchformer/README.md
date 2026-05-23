@@ -23,13 +23,13 @@ losses, or checkpoint structure.
 Build the image:
 
 ```bash
-python scripts/sketchformer_codebase_finetune.py --sudo build-image
+python scripts/integrations/sketchformer_codebase_finetune.py --sudo build-image
 ```
 
 Prepare legacy-compatible stroke3 chunks:
 
 ```bash
-python scripts/sketchformer_codebase_finetune.py --sudo prepare-data \
+python scripts/integrations/sketchformer_codebase_finetune.py --sudo prepare-data \
   --source-dir data/processed/stroke5 \
   --target-dir data/processed/sketchformer-ready-data/stroke3 \
   --n-chunks 10 \
@@ -39,11 +39,11 @@ python scripts/sketchformer_codebase_finetune.py --sudo prepare-data \
 Evaluate pretrained reconstruction:
 
 ```bash
-python scripts/sketchformer_codebase_finetune.py --sudo evaluate-reconstruction
+python scripts/integrations/sketchformer_codebase_finetune.py --sudo evaluate-reconstruction
 ```
 
 Fine-tune:
 
 ```bash
-python scripts/sketchformer_codebase_finetune.py --sudo finetune-continuous
+python scripts/integrations/sketchformer_codebase_finetune.py --sudo finetune-continuous
 ```
