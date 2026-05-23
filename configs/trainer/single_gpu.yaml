@@ -1,0 +1,40 @@
+name: single_gpu
+
+runtime:
+  accelerator: auto
+  devices: 1
+  precision: 32-true
+  deterministic: false
+  benchmark: true
+
+training:
+  max_epochs: 1
+  max_steps: null
+  val_check_interval: 1.0
+  log_every_n_steps: 10
+  limit_train_batches: 1.0
+  limit_val_batches: 1.0
+
+checkpointing:
+  enabled: true
+  monitor: val/reconstruction_loss
+  mode: min
+  save_top_k: 3
+  save_last: true
+  filename: epoch_{epoch:03d}-val_recon_{val/reconstruction_loss:.4f}
+
+logging:
+  tensorboard: true
+  wandb:
+    enabled: false
+    project: text-to-sketch
+    entity: null
+  reconstruction_plots:
+    enabled: true
+    every_n_epochs: 1
+    num_samples: 18
+
+debug:
+  fast_dev_run: false
+  detect_anomaly: false
+  profiler: null

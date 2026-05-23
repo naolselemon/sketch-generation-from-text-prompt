@@ -1,0 +1,35 @@
+name: anime_continuous_finetune
+description: Fine-tune the in-repo continuous Sketchformer model on anime stroke3 data.
+
+run:
+  id: anime-continuous-finetune
+  output_dir: weights/finetuned/sketchformer-continuous-anime
+  resume_from_checkpoint: null
+
+pretrained:
+  use_converted_sketchformer_weights: true
+  path: weights/pretrained/sketchformer_continuous.safetensors
+  strict: false
+
+overrides:
+  data:
+    batching:
+      batch_size: 8
+      eval_batch_size: 18
+      num_workers: 4
+  trainer:
+    training:
+      max_epochs: 20
+      log_every_n_steps: 50
+    checkpointing:
+      save_top_k: 3
+  optimizer:
+    optimizer:
+      lr: 0.00005
+    scheduler:
+      warmup_steps: 1000
+
+evaluation:
+  primary_metric: val/reconstruction_loss
+  generate_reconstruction_plots: true
+  generate_svg_samples: true
