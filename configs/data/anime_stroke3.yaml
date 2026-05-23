@@ -17,21 +17,13 @@ format:
   continuous: true
 
 sequence:
-  max_length: 1024
+  max_length: 2048
   target_max_length: 2048
   pad_value: 0.0
   pad_to_multiple_of: 8
   truncate_long_sequences: true
   add_end_token: false
-  length_curriculum:
-    enabled: true
-    stages:
-      - max_length: 512
-        until_epoch: 2
-      - max_length: 1024
-        until_epoch: 8
-      - max_length: 2048
-        until_epoch: null
+  build_attention_mask: false
 
 batching:
   batch_size: 2

@@ -7,14 +7,14 @@ run:
   resume_from_checkpoint: null
 
 pretrained:
-  use_converted_sketchformer_weights: true
+  use_converted_sketchformer_weights: false
   path: weights/pretrained/sketchformer_continuous.safetensors
   strict: false
 
 overrides:
   data:
     sequence:
-      max_length: 1024
+      max_length: 2048
       target_max_length: 2048
     batching:
       batch_size: 2

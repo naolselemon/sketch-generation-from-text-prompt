@@ -23,12 +23,15 @@ short, simple QuickDraw-style drawings used by the original Sketchformer setup.
 For that reason, the base data/model configs are long-sequence capable:
 
 - the model supports sequences up to `2048` stroke3 steps;
-- the data config starts at `1024` and defines a curriculum toward `2048`;
+- the anime data config trains at `2048` by default for server-side runs;
 - the smoke-test experiment overrides sequence length down to `256`;
 - attention is configured for PyTorch scaled dot-product attention with Flash
   Attention preferred when the hardware supports it;
+- the anime data config does not build full SDPA padding masks by default, so
+  long 2048-token runs can stay on the Flash/memory-efficient attention path;
 - sparse attention is represented in config but disabled until the dense
   Flash/SDPA baseline is correct.
 
-This keeps the research direction ambitious while making implementation and
-debugging staged.
+The default trainer config uses CUDA `16-mixed` precision and TF32-friendly
+runtime settings for an RTX 3090-class server. CPU development should use the
+`smoke_test` experiment or explicit CLI overrides.

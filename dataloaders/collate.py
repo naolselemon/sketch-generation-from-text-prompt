@@ -25,6 +25,7 @@ class Stroke3Collator:
     pad_value: float = 0.0
     pad_to_multiple_of: int | None = 8
     causal_attention: bool = False
+    build_attention_mask: bool = True
 
     def __call__(self, samples: list[dict[str, Any]]) -> dict[str, Any]:
         if not samples:
@@ -64,6 +65,8 @@ class Stroke3Collator:
             causal=self.causal_attention,
             device=strokes.device,
         )
+        if not self.build_attention_mask:
+            masks["sdpa_mask"] = None
 
         return {
             "strokes": strokes,

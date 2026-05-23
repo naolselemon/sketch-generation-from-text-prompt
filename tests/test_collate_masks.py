@@ -85,6 +85,26 @@ class CollateAndMaskTest(unittest.TestCase):
         self.assertEqual(batch["sdpa_mask"].shape, (2, 1, 8, 8))
         self.assertEqual(batch["lengths"].tolist(), [3, 5])
 
+    def test_collator_can_skip_full_attention_mask_for_long_sequences(self) -> None:
+        samples = [
+            {
+                "stroke3": _stroke(3),
+                "label": 0,
+                "length": 3,
+                "source_file": "a.npz",
+                "source_index": 0,
+            },
+        ]
+
+        batch = Stroke3Collator(
+            max_length=8,
+            pad_to_multiple_of=4,
+            build_attention_mask=False,
+        )(samples)
+
+        self.assertIsNone(batch["sdpa_mask"])
+        self.assertEqual(batch["valid_mask"].shape, (1, 4))
+
     def test_datamodule_returns_train_and_validation_loaders(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

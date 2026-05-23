@@ -20,7 +20,7 @@ PROJECT_ROOT = _add_project_to_path()
 
 import torch
 
-from builders import build_loss, build_model_from_config
+from builders import build_loss, build_model, maybe_compile_model
 from core import average_logs, load_checkpoint, move_to_device
 from core.metrics import reconstruction_metrics
 from dataloaders import StrokeSequenceDataModule
@@ -63,11 +63,12 @@ def main() -> int:
     datamodule.setup("test" if args.split == "test" else "fit")
     loader = datamodule.test_dataloader() if args.split == "test" else datamodule.val_dataloader()
 
-    model = build_model_from_config(config["model"]).to(device)
+    raw_model = build_model(config["model"])
     if args.checkpoint:
-        load_checkpoint(PROJECT_ROOT / args.checkpoint, model, strict=False)
+        load_checkpoint(PROJECT_ROOT / args.checkpoint, raw_model, strict=False)
     else:
         print("[warning] evaluating randomly initialized model; pass --checkpoint for trained weights")
+    model = maybe_compile_model(raw_model.to(device), config["model"])
 
     loss_fn = build_loss(config["optimizer"]).to(device)
     model.eval()
