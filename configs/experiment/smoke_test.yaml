@@ -6,6 +6,7 @@ overrides:
     sequence:
       max_length: 256
       target_max_length: 256
+      pad_to_multiple_of: 8
       length_curriculum:
         enabled: false
     batching:
