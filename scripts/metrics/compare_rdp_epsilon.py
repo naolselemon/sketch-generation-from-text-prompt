@@ -1,4 +1,4 @@
-"""Compatibility wrapper for ``metrics.compare_rdp_epsilon``."""
+"""Compatibility wrapper for ``metrics.preprocessing.compare_rdp_epsilon``."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ def _add_project_to_path() -> None:
 
 _add_project_to_path()
 
-from metrics.compare_rdp_epsilon import main
+from metrics.preprocessing.compare_rdp_epsilon import main
 
 
 if __name__ == "__main__":

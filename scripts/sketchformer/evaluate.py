@@ -24,7 +24,7 @@ from builders import build_loss, build_model_from_config
 from core import average_logs, load_checkpoint, move_to_device
 from core.metrics import reconstruction_metrics
 from dataloaders import StrokeSequenceDataModule
-from metrics.sketchformer_reconstruction import (
+from metrics.sketchformer.reconstruction import (
     collect_reconstruction_examples,
     write_metrics_report,
 )
@@ -114,7 +114,7 @@ def main() -> int:
         print(f"[metrics] wrote {metrics_path}")
 
     if args.plots_output_dir and examples:
-        from metrics.sketchformer_visualisation import save_reconstruction_examples
+        from metrics.sketchformer.visualisation import save_reconstruction_examples
 
         plot_dir = PROJECT_ROOT / args.plots_output_dir
         saved = save_reconstruction_examples(examples, plot_dir)

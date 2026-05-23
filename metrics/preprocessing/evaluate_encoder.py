@@ -1,9 +1,7 @@
-"""
-Evaluate Tok-Dict Encoder/Decoder.
+"""Evaluate Tok-Dict encoder/decoder reconstruction quality.
 
 Loads a stroke-5 array, encodes it to tokens, decodes it back to stroke-5,
 and compares the reconstructed result against the original.
-
 """
 
 from __future__ import annotations

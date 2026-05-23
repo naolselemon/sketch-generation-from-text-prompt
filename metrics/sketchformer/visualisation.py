@@ -7,7 +7,7 @@ from pathlib import Path
 
 import numpy as np
 
-from metrics.sketchformer_reconstruction import ReconstructionExample
+from metrics.sketchformer.reconstruction import ReconstructionExample
 
 os.environ.setdefault("MPLCONFIGDIR", "/tmp/matplotlib")
 

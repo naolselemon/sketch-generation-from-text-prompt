@@ -1,6 +1,6 @@
-"""Evaluation commands and lightweight reusable metric helpers."""
+"""Metrics and qualitative plots for native Sketchformer fine-tuning."""
 
-from metrics.sketchformer import (
+from metrics.sketchformer.reconstruction import (
     ReconstructionExample,
     collect_reconstruction_examples,
     prediction_to_stroke3,

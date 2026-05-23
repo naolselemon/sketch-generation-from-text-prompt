@@ -1,4 +1,4 @@
-"""Plot original sketches beside vectorized stroke output."""
+"""Plot preprocessing sketches beside vectorized stroke output."""
 
 from __future__ import annotations
 
@@ -80,4 +80,3 @@ def save_original_vs_simplified(
     fig.tight_layout()
     fig.savefig(output_path, bbox_inches="tight", facecolor="white")
     plt.close(fig)
-

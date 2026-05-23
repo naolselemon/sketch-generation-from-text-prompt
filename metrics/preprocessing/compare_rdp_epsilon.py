@@ -33,7 +33,7 @@ from pipeline.vectorization import (
     vectorize_image_with_stats,
 )
 from utils.io import save_stroke5
-from metrics.visualisation import save_original_vs_simplified
+from metrics.preprocessing.visualisation import save_original_vs_simplified
 
 
 _ORDER_FN_MAP = {

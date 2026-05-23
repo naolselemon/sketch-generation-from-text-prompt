@@ -1,4 +1,4 @@
-"""Reporting helpers for native Sketchformer reconstruction evaluation."""
+"""Reconstruction reporting helpers for native Sketchformer evaluation."""
 
 from __future__ import annotations
 

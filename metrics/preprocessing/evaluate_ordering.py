@@ -1,3 +1,5 @@
+"""Visualize preprocessing stroke ordering strategies."""
+
 import argparse
 import random
 

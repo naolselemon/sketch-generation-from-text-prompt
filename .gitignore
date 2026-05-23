@@ -3,7 +3,7 @@
 data/
 !configs/data/
 __pycache__/
-sketchformer/
+/sketchformer/
 !models/sketchformer/
 !models/sketchformer/**
 !scripts/sketchformer/
