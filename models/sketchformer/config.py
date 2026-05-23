@@ -1,0 +1,177 @@
+"""Configuration objects for the native PyTorch Sketchformer model."""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+from typing import Any
+
+
+def _get(config: Mapping[str, Any], key: str, default: Any = None) -> Any:
+    value = config.get(key, default)
+    return default if value is None else value
+
+
+@dataclass(frozen=True)
+class AttentionConfig:
+    implementation: str = "sdpa"
+    preferred_backend: str = "flash"
+    allow_flash: bool = True
+    allow_memory_efficient: bool = True
+    allow_math_fallback: bool = True
+
+    @classmethod
+    def from_mapping(cls, config: Mapping[str, Any] | None) -> "AttentionConfig":
+        config = config or {}
+        return cls(
+            implementation=str(_get(config, "implementation", "sdpa")),
+            preferred_backend=str(_get(config, "preferred_backend", "flash")),
+            allow_flash=bool(_get(config, "allow_flash", True)),
+            allow_memory_efficient=bool(_get(config, "allow_memory_efficient", True)),
+            allow_math_fallback=bool(_get(config, "allow_math_fallback", True)),
+        )
+
+
+@dataclass(frozen=True)
+class PositionalEncodingConfig:
+    type: str = "learned"
+    max_length: int = 2048
+    checkpoint_extension: str = "interpolate_then_random_init"
+
+    @classmethod
+    def from_mapping(cls, config: Mapping[str, Any] | str | None) -> "PositionalEncodingConfig":
+        if isinstance(config, str):
+            return cls(type=config)
+        config = config or {}
+        return cls(
+            type=str(_get(config, "type", "learned")),
+            max_length=int(_get(config, "max_length", 2048)),
+            checkpoint_extension=str(
+                _get(config, "checkpoint_extension", "interpolate_then_random_init")
+            ),
+        )
+
+
+@dataclass(frozen=True)
+class ReconstructionHeadConfig:
+    enabled: bool = True
+    xy_distribution: str = "gaussian_mixture"
+    num_mixtures: int = 20
+    predict_pen_state: bool = True
+
+    @classmethod
+    def from_mapping(cls, config: Mapping[str, Any] | None) -> "ReconstructionHeadConfig":
+        config = config or {}
+        return cls(
+            enabled=bool(_get(config, "enabled", True)),
+            xy_distribution=str(_get(config, "xy_distribution", "gaussian_mixture")),
+            num_mixtures=int(_get(config, "num_mixtures", 20)),
+            predict_pen_state=bool(_get(config, "predict_pen_state", True)),
+        )
+
+
+@dataclass(frozen=True)
+class ClassificationHeadConfig:
+    enabled: bool = False
+    num_classes: int = 345
+    dropout: float = 0.1
+
+    @classmethod
+    def from_mapping(cls, config: Mapping[str, Any] | None) -> "ClassificationHeadConfig":
+        config = config or {}
+        return cls(
+            enabled=bool(_get(config, "enabled", False)),
+            num_classes=int(_get(config, "num_classes", 345)),
+            dropout=float(_get(config, "dropout", 0.1)),
+        )
+
+
+@dataclass(frozen=True)
+class SketchformerConfig:
+    name: str = "sketchformer_continuous"
+    stroke_dim: int = 3
+    pen_classes: int = 3
+    max_seq_len: int = 2048
+    d_model: int = 128
+    latent_dim: int = 256
+    num_encoder_layers: int = 4
+    num_decoder_layers: int = 4
+    num_heads: int = 8
+    dim_feedforward: int = 512
+    dropout: float = 0.1
+    activation: str = "gelu"
+    norm_first: bool = True
+    gradient_checkpointing: bool = True
+    pen_embedding_dim: int = 32
+    combine_method: str = "add"
+    positional_encoding: PositionalEncodingConfig = field(
+        default_factory=PositionalEncodingConfig
+    )
+    encoder_attention: AttentionConfig = field(default_factory=AttentionConfig)
+    decoder_attention: AttentionConfig = field(default_factory=AttentionConfig)
+    blind_decoder_mask: bool = True
+    reconstruction: ReconstructionHeadConfig = field(
+        default_factory=ReconstructionHeadConfig
+    )
+    classification: ClassificationHeadConfig = field(
+        default_factory=ClassificationHeadConfig
+    )
+    compile_enabled: bool = False
+    compile_mode: str = "default"
+
+    @classmethod
+    def from_mapping(cls, config: Mapping[str, Any]) -> "SketchformerConfig":
+        input_cfg = config.get("input", {})
+        architecture = config.get("architecture", {})
+        embedding = config.get("embedding", {})
+        encoder = config.get("encoder", {})
+        decoder = config.get("decoder", {})
+        heads = config.get("heads", {})
+        compile_cfg = config.get("compile", {})
+
+        return cls(
+            name=str(_get(config, "name", "sketchformer_continuous")),
+            stroke_dim=int(_get(input_cfg, "stroke_dim", 3)),
+            pen_classes=int(_get(input_cfg, "pen_classes", 3)),
+            max_seq_len=int(_get(input_cfg, "max_seq_len", 2048)),
+            d_model=int(_get(architecture, "d_model", 128)),
+            latent_dim=int(_get(architecture, "latent_dim", 256)),
+            num_encoder_layers=int(_get(architecture, "num_encoder_layers", 4)),
+            num_decoder_layers=int(_get(architecture, "num_decoder_layers", 4)),
+            num_heads=int(_get(architecture, "num_heads", 8)),
+            dim_feedforward=int(_get(architecture, "dim_feedforward", 512)),
+            dropout=float(_get(architecture, "dropout", 0.1)),
+            activation=str(_get(architecture, "activation", "gelu")),
+            norm_first=bool(_get(architecture, "norm_first", True)),
+            gradient_checkpointing=bool(
+                _get(architecture, "gradient_checkpointing", True)
+            ),
+            pen_embedding_dim=int(_get(embedding, "pen_embedding_dim", 32)),
+            combine_method=str(_get(embedding, "combine_method", "add")),
+            positional_encoding=PositionalEncodingConfig.from_mapping(
+                embedding.get("positional_encoding", {})
+            ),
+            encoder_attention=AttentionConfig.from_mapping(encoder.get("attention", {})),
+            decoder_attention=AttentionConfig.from_mapping(decoder.get("attention", {})),
+            blind_decoder_mask=bool(_get(decoder, "blind_decoder_mask", True)),
+            reconstruction=ReconstructionHeadConfig.from_mapping(
+                heads.get("reconstruction", {})
+            ),
+            classification=ClassificationHeadConfig.from_mapping(
+                heads.get("classification", {})
+            ),
+            compile_enabled=bool(_get(compile_cfg, "enabled", False)),
+            compile_mode=str(_get(compile_cfg, "mode", "default")),
+        )
+
+    def validate(self) -> None:
+        if self.stroke_dim != 3:
+            raise ValueError("Only stroke3 input is supported for the first model version")
+        if self.d_model % self.num_heads != 0:
+            raise ValueError("d_model must be divisible by num_heads")
+        if self.combine_method != "add":
+            raise ValueError("Only embedding.combine_method=add is currently supported")
+        if self.positional_encoding.type != "learned":
+            raise ValueError("Only learned positional encoding is currently supported")
+        if self.max_seq_len > self.positional_encoding.max_length:
+            raise ValueError("max_seq_len exceeds positional encoding max_length")

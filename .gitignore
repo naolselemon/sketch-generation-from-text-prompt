@@ -1,8 +1,11 @@
 .env
 .venv
 data/
+!configs/data/
 __pycache__/
 sketchformer/
+!models/sketchformer/
+!models/sketchformer/**
 dependencies/Anime2Sketch/
 *.egg-info/
 build/
