@@ -1,0 +1,17 @@
+defaults:
+  - data: anime_stroke3
+  - model: sketchformer_continuous
+  - optimizer: adamw_cosine
+  - trainer: single_gpu
+  - experiment: smoke_test
+  - _self_
+
+project:
+  name: text-to-sketch
+  task: in_repo_sketchformer_finetuning
+  seed: 42
+
+paths:
+  output_root: weights/finetuned
+  run_root: runs/sketchformer
+  log_root: logs/sketchformer
