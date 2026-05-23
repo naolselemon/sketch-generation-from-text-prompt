@@ -1,0 +1,95 @@
+# In-Repo Sketchformer Fine-Tuning Experiments
+
+This folder records the experiment plan for the native PyTorch Sketchformer
+fine-tuning path.
+
+The executable configuration remains under:
+
+```text
+configs/experiment/
+```
+
+This folder is the experiment runbook layer. It explains what each experiment
+is for, which command launches it, what outputs should be produced, and what
+criteria must pass before moving to the next stage.
+
+## Experiments
+
+| Experiment | Purpose | Canonical Config |
+|---|---|---|
+| `smoke_test` | Verify the full in-repo training path on a tiny run. | `configs/experiment/smoke_test.yaml` |
+| `anime_continuous_finetune` | Fine-tune the long-sequence continuous model on anime stroke3 data. | `configs/experiment/anime_continuous_finetune.yaml` |
+
+## Stage Order
+
+### 1. Smoke Test
+
+Run this first after changes to dataloaders, model, losses, builders, core, or
+scripts:
+
+```bash
+python scripts/sketchformer/train.py --experiment smoke_test
+```
+
+The smoke test is intentionally short. It confirms the pipeline can load data,
+run the model forward, compute loss, backpropagate, validate, and save a
+checkpoint.
+
+### 2. Anime Continuous Fine-Tuning
+
+Run this after the smoke test passes:
+
+```bash
+python scripts/sketchformer/train.py --experiment anime_continuous_finetune
+```
+
+This experiment targets longer, more detailed anime sketches. The config starts
+at 1024 stroke steps and is designed to scale toward 2048 steps. Real training
+should run on a CUDA GPU machine; CPU is only practical for smoke tests.
+
+## Common Commands
+
+Dry-run the training config:
+
+```bash
+python scripts/sketchformer/train.py --experiment smoke_test --dry-run
+```
+
+Evaluate a checkpoint:
+
+```bash
+python scripts/sketchformer/evaluate.py \
+  --experiment smoke_test \
+  --checkpoint weights/finetuned/smoke_test/last.pt
+```
+
+Export a checkpoint:
+
+```bash
+python scripts/sketchformer/export.py \
+  --experiment smoke_test \
+  --checkpoint weights/finetuned/smoke_test/last.pt \
+  --output weights/finetuned/smoke_test/export.pt
+```
+
+Prepare for TensorFlow checkpoint conversion:
+
+```bash
+python scripts/sketchformer/convert_checkpoint.py \
+  --source weights/pretrained/sketch-transformer-tf2-cvpr_tform_cont/weights/ckpt-12 \
+  --output weights/pretrained/sketchformer_continuous.safetensors \
+  --dry-run
+```
+
+## Acceptance Criteria
+
+Before trusting a fine-tuning run:
+
+- The dataloader returns non-empty train and validation batches.
+- The model forward pass produces reconstruction output with expected shape.
+- The loss is finite.
+- One optimizer step completes.
+- Validation metrics are logged.
+- `last.pt` checkpoint is saved.
+- Evaluation can load the checkpoint.
+- Export can write a standalone PyTorch or safetensors file.

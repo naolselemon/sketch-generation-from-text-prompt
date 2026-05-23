@@ -1,1 +1,1 @@
-"""Experiment scripts and analysis jobs."""
+"""Experiment manifests and launch notes."""
