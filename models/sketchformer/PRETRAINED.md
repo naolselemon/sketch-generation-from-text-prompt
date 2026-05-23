@@ -1,7 +1,7 @@
-# Pretrained Sketchformer Integration
+# Pretrained Sketchformer Assets
 
-This folder describes and validates pretrained Sketchformer assets used by the
-native PyTorch fine-tuning path.
+This document describes pretrained Sketchformer assets used by the native
+PyTorch fine-tuning path.
 
 The original CVPR continuous checkpoint is a TensorFlow checkpoint family, not
 a single portable weight file. A usable pretrained source includes:
@@ -12,7 +12,7 @@ a single portable weight file. A usable pretrained source includes:
 - matching `weights/*.data-*` shard files
 - optional evaluation plots under `plots/`
 
-## Why This Exists
+## Why This Exists Here
 
 Native fine-tuning needs a reliable handoff from the original TensorFlow
 checkpoint layout into the in-repo PyTorch model. Before implementing the
@@ -27,7 +27,7 @@ variable-by-variable conversion table, we need a stable way to answer:
 ## Inspect The Assets
 
 ```bash
-python scripts/integrations/inspect_pretrained_sketchformer.py
+python scripts/sketchformer/inspect_pretrained.py
 ```
 
 The default root is:
@@ -39,16 +39,18 @@ weights/pretrained/sketch-transformer-tf2-cvpr_tform_cont
 Print JSON instead of a text report:
 
 ```bash
-python scripts/integrations/inspect_pretrained_sketchformer.py --json
+python scripts/sketchformer/inspect_pretrained.py --json
 ```
 
 ## Conversion Boundary
 
-This integration does not convert TensorFlow weights yet. Conversion belongs to:
+This inspection utility does not convert TensorFlow weights yet. Conversion
+belongs to:
 
 ```text
 scripts/sketchformer/convert_checkpoint.py
 models/sketchformer/checkpoint_mapping.py
 ```
 
-This folder only validates the source assets those conversion tools will read.
+This native model utility only validates the source assets those conversion
+tools will read.

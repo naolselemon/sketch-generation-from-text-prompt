@@ -18,7 +18,7 @@ def _add_project_to_path() -> Path:
 
 PROJECT_ROOT = _add_project_to_path()
 
-from integrations.pretrained_sketchformer import (
+from models.sketchformer.pretrained import (
     DEFAULT_PRETRAINED_ROOT,
     format_validation_report,
     validate_pretrained_assets,

@@ -22,7 +22,7 @@ def _add_project_to_path() -> Path:
 
 PROJECT_ROOT = _add_project_to_path()
 
-from integrations.pretrained_sketchformer import inspect_tensorflow_checkpoint
+from models.sketchformer.pretrained import inspect_tensorflow_checkpoint
 from scripts.sketchformer.config import compose_training_config
 
 
