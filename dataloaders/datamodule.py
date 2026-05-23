@@ -179,6 +179,7 @@ class StrokeSequenceDataModule:
             pad_value=float(_get(self.config, "sequence.pad_value", 0.0)),
             pad_to_multiple_of=int(_get(self.config, "sequence.pad_to_multiple_of", 8)),
             causal_attention=False,
+            build_attention_mask=bool(_get(self.config, "sequence.build_attention_mask", True)),
         )
 
         if is_train and bool(_get(self.config, "batching.bucket_by_length", False)):

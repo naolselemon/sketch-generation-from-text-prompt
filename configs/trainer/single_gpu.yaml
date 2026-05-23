@@ -3,9 +3,10 @@ name: single_gpu
 runtime:
   accelerator: auto
   devices: 1
-  precision: bf16-mixed
+  precision: 16-mixed
   deterministic: false
   benchmark: true
+  allow_tf32: true
 
 training:
   max_epochs: 1

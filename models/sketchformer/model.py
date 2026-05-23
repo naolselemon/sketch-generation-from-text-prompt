@@ -131,7 +131,11 @@ class SketchformerModel(nn.Module):
     ) -> torch.Tensor:
         target_input = self.target_embedding(targets)
         memory = self.latent_expander(embedding, target_input.shape[1])
-        cross_attention_mask = self._cross_attention_mask(valid_mask, target_input.shape[1])
+        cross_attention_mask = (
+            None
+            if self.config.blind_decoder_mask
+            else self._cross_attention_mask(valid_mask, target_input.shape[1])
+        )
         return self.decoder(
             target_input,
             memory,

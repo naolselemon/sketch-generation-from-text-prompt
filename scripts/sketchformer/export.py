@@ -19,7 +19,7 @@ PROJECT_ROOT = _add_project_to_path()
 
 import torch
 
-from builders import build_model_from_config
+from builders import build_model
 from core import load_checkpoint
 from scripts.sketchformer.config import compose_training_config
 
@@ -36,7 +36,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     config = compose_training_config(args.config, experiment=args.experiment)
-    model = build_model_from_config(config["model"])
+    model = build_model(config["model"])
     load_checkpoint(PROJECT_ROOT / args.checkpoint, model, strict=False)
 
     output_path = PROJECT_ROOT / args.output

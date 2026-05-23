@@ -15,6 +15,9 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_IMAGE = "sketchformer-tf2-cpu"
+DEFAULT_DOCKERFILE = "integrations/original_sketchformer/docker/Dockerfile.cpu"
+DEFAULT_GPU_IMAGE = "sketchformer-tf2-gpu"
+DEFAULT_GPU_DOCKERFILE = "integrations/original_sketchformer/docker/Dockerfile.gpu"
 DEFAULT_DATASET = "data/processed/sketchformer-ready-data/stroke3"
 DEFAULT_SOURCE_STROKE5 = "data/processed/stroke5"
 DEFAULT_PRETRAINED_OUTPUT = "weights/pretrained"
@@ -23,6 +26,7 @@ DEFAULT_CONTINUOUS_RESUME = (
     "weights/pretrained/"
     "sketch-transformer-tf2-cvpr_tform_cont/weights/ckpt-12"
 )
+DEFAULT_LEGACY_MAX_SEQ_LEN = 200
 
 
 def project_path(path: str) -> Path:
@@ -57,15 +61,18 @@ def docker_base(args: argparse.Namespace) -> list[str]:
 
 
 def docker_run(args: argparse.Namespace, workdir: str) -> list[str]:
-    return docker_base(args) + [
+    command = docker_base(args) + [
         "run",
         "--rm",
         "-v",
         "{}:/workspace".format(PROJECT_ROOT),
         "-w",
         workdir,
-        args.image,
     ]
+    if args.gpus:
+        command += ["--gpus", args.gpus]
+    command.append(args.image)
+    return command
 
 
 def run_or_print(command: list[str], dry_run: bool) -> int:
@@ -77,13 +84,35 @@ def run_or_print(command: list[str], dry_run: bool) -> int:
     return subprocess.call(command)
 
 
+def compose_legacy_data_hparams(args: argparse.Namespace) -> str:
+    if args.data_hparams:
+        return args.data_hparams
+    return "use_continuous_data=True,max_seq_len={}".format(args.max_seq_len)
+
+
+def maybe_warn_sequence_checkpoint_mismatch(args: argparse.Namespace) -> None:
+    if args.dry_run:
+        return
+    if args.resume in {"none", "None", ""}:
+        return
+    if args.data_hparams:
+        return
+    if int(args.max_seq_len) != DEFAULT_LEGACY_MAX_SEQ_LEN:
+        print(
+            "[warning] The original continuous Sketchformer checkpoint was "
+            "trained with max_seq_len=200. Changing --max-seq-len while "
+            "resuming that checkpoint may fail because TensorFlow layer "
+            "shapes are sequence-length dependent."
+        )
+
+
 def build_image(args: argparse.Namespace) -> int:
     command = docker_base(args) + [
         "build",
         "-t",
         args.image,
         "-f",
-        str(PROJECT_ROOT / "integrations" / "original_sketchformer" / "docker" / "Dockerfile.cpu"),
+        str(project_path(args.dockerfile)),
         str(PROJECT_ROOT / "integrations" / "original_sketchformer" / "docker"),
     ]
     return run_or_print(command, args.dry_run)
@@ -142,6 +171,7 @@ def evaluate_reconstruction(args: argparse.Namespace) -> int:
 def finetune_continuous(args: argparse.Namespace) -> int:
     if not args.dry_run:
         project_path(args.output_dir).mkdir(parents=True, exist_ok=True)
+    maybe_warn_sequence_checkpoint_mismatch(args)
     command = docker_run(args, "/workspace/sketchformer") + [
         "python",
         "train.py",
@@ -155,7 +185,7 @@ def finetune_continuous(args: argparse.Namespace) -> int:
         "--gpu",
         str(args.gpu),
         "--data-hparams",
-        args.data_hparams,
+        compose_legacy_data_hparams(args),
         "--base-hparams",
         args.base_hparams,
         "--hparams",
@@ -169,8 +199,12 @@ def finetune_continuous(args: argparse.Namespace) -> int:
 def add_common(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--image", default=DEFAULT_IMAGE,
                         help="Docker image name used for original Sketchformer.")
+    parser.add_argument("--dockerfile", default=DEFAULT_DOCKERFILE,
+                        help="Dockerfile used by build-image.")
     parser.add_argument("--docker-bin", default="docker",
                         help="Docker executable to call.")
+    parser.add_argument("--gpus", default=None,
+                        help="Optional Docker --gpus value, for example 'all'.")
     parser.add_argument("--sudo", action="store_true",
                         help="Prefix Docker commands with sudo.")
     parser.add_argument("--dry-run", action="store_true",
@@ -191,6 +225,15 @@ def build_parser() -> argparse.ArgumentParser:
     build = subparsers.add_parser("build-image",
                                   help="Build the CPU TensorFlow 2.1 Docker image.")
     build.set_defaults(func=build_image)
+
+    build_gpu = subparsers.add_parser(
+        "build-gpu-image",
+        help="Build the TensorFlow GPU image intended for RTX 3090 servers.")
+    build_gpu.set_defaults(
+        func=build_image,
+        image=DEFAULT_GPU_IMAGE,
+        dockerfile=DEFAULT_GPU_DOCKERFILE,
+    )
 
     prep = subparsers.add_parser(
         "prepare-data",
@@ -228,8 +271,18 @@ def build_parser() -> argparse.ArgumentParser:
     finetune.add_argument("--resume", default=DEFAULT_CONTINUOUS_RESUME)
     finetune.add_argument("--gpu", default=0, type=int)
     finetune.add_argument(
+        "--max-seq-len",
+        default=DEFAULT_LEGACY_MAX_SEQ_LEN,
+        type=int,
+        help=(
+            "Legacy dataloader sequence length. Keep 200 when resuming the "
+            "released continuous checkpoint; larger values are for from-scratch "
+            "legacy experiments."
+        ),
+    )
+    finetune.add_argument(
         "--data-hparams",
-        default="use_continuous_data=True,max_seq_len=200")
+        default=None)
     finetune.add_argument(
         "--base-hparams",
         default=(
