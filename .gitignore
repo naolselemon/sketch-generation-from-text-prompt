@@ -6,6 +6,7 @@ __pycache__/
 sketchformer/
 !models/sketchformer/
 !models/sketchformer/**
+!scripts/sketchformer/
 dependencies/Anime2Sketch/
 *.egg-info/
 build/

@@ -24,7 +24,7 @@ from builders import build_loss, build_model_from_config
 from core import average_logs, load_checkpoint, move_to_device
 from core.metrics import reconstruction_metrics
 from dataloaders import StrokeSequenceDataModule
-from scripts.sketchformer_config import (
+from scripts.sketchformer.config import (
     compose_training_config,
     format_logs,
     limited,

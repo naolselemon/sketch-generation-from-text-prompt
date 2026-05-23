@@ -26,7 +26,7 @@ from builders.config_utils import get_nested
 from core import CheckpointCallback, average_logs, move_to_device, set_seed
 from core.metrics import reconstruction_metrics
 from dataloaders import StrokeSequenceDataModule
-from scripts.sketchformer_config import (
+from scripts.sketchformer.config import (
     batch_limit,
     compose_training_config,
     format_logs,

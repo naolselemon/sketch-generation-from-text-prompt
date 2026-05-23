@@ -21,7 +21,7 @@ import torch
 
 from builders import build_model_from_config
 from core import load_checkpoint
-from scripts.sketchformer_config import compose_training_config
+from scripts.sketchformer.config import compose_training_config
 
 
 def parse_args() -> argparse.Namespace:

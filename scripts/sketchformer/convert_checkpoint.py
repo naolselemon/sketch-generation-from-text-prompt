@@ -22,7 +22,7 @@ def _add_project_to_path() -> Path:
 
 PROJECT_ROOT = _add_project_to_path()
 
-from scripts.sketchformer_config import compose_training_config
+from scripts.sketchformer.config import compose_training_config
 
 
 def parse_args() -> argparse.Namespace:
@@ -57,7 +57,7 @@ def main() -> int:
         )
 
     raise SystemExit(
-        "Torch-to-native conversion is not needed yet; use scripts/export_sketchformer.py "
+        "Torch-to-native conversion is not needed yet; use scripts/sketchformer/export.py "
         "for PyTorch checkpoints."
     )
 

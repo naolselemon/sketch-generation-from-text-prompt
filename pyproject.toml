@@ -15,7 +15,11 @@ tts-extract-sketches = "prep_data.extract_sketches:main"
 tts-filter-sketches = "prep_data.filter_sketches:main"
 tts-prepare-sketchformer = "prep_data.prepare_sketchformer:main"
 tts-run-pipeline = "pipeline.run_pipeline:main"
-tts-sketchformer-codebase-finetune = "integrations.original_sketchformer.launcher:main"
+tts-sketchformer-codebase-finetune = "scripts.integrations.sketchformer_codebase_finetune:main"
+tts-train-sketchformer = "scripts.sketchformer.train:main"
+tts-evaluate-sketchformer = "scripts.sketchformer.evaluate:main"
+tts-export-sketchformer = "scripts.sketchformer.export:main"
+tts-convert-sketchformer-checkpoint = "scripts.sketchformer.convert_checkpoint:main"
 tts-compare-rdp = "metrics.compare_rdp_epsilon:main"
 tts-evaluate-encoder = "metrics.evaluate_encoder:main"
 tts-evaluate-ordering = "metrics.evaluate_ordering:main"
@@ -35,5 +39,7 @@ include = [
   "pipeline",
   "prep_data",
   "prep_data.*",
+  "scripts",
+  "scripts.*",
   "utils",
 ]
