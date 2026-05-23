@@ -1,0 +1,160 @@
+"""Losses for native in-repo Sketchformer fine-tuning."""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from dataclasses import dataclass
+from typing import Any
+
+import torch
+import torch.nn.functional as F
+from torch import nn
+
+
+@dataclass
+class SketchformerLossOutput:
+    """Structured loss values returned by ``SketchformerLoss``."""
+
+    total: torch.Tensor
+    reconstruction: torch.Tensor
+    pen_state: torch.Tensor
+    classification: torch.Tensor
+    xy_mse: torch.Tensor
+
+    def as_log_dict(self, prefix: str = "") -> dict[str, torch.Tensor]:
+        name = f"{prefix}/" if prefix else ""
+        return {
+            f"{name}loss": self.total.detach(),
+            f"{name}reconstruction_loss": self.reconstruction.detach(),
+            f"{name}pen_state_loss": self.pen_state.detach(),
+            f"{name}classification_loss": self.classification.detach(),
+            f"{name}xy_mse": self.xy_mse.detach(),
+        }
+
+
+def _weight(weights: Any, name: str, default: float) -> float:
+    if isinstance(weights, Mapping):
+        return float(weights.get(name, default))
+    return float(getattr(weights, name, default))
+
+
+def masked_mean(values: torch.Tensor, valid_mask: torch.Tensor) -> torch.Tensor:
+    """Mean over valid sequence positions only."""
+
+    mask = valid_mask.to(dtype=values.dtype, device=values.device)
+    while mask.ndim < values.ndim:
+        mask = mask.unsqueeze(-1)
+    numerator = torch.sum(values * mask)
+    denominator = torch.sum(mask).clamp_min(1.0)
+    return numerator / denominator
+
+
+def gaussian_mixture_nll(reconstruction: Any, target_xy: torch.Tensor) -> torch.Tensor:
+    """Bivariate Gaussian-mixture negative log likelihood per time step."""
+
+    if reconstruction.mixture_logits is None:
+        raise ValueError("Gaussian mixture output is missing mixture_logits")
+    if reconstruction.mu is None or reconstruction.log_sigma is None or reconstruction.rho is None:
+        raise ValueError("Gaussian mixture output is missing mu/log_sigma/rho")
+
+    target = target_xy.unsqueeze(-2)
+    mu = reconstruction.mu
+    log_sigma = reconstruction.log_sigma.clamp(min=-7.0, max=7.0)
+    sigma = torch.exp(log_sigma).clamp_min(1e-5)
+    rho = reconstruction.rho.clamp(min=-0.999, max=0.999)
+
+    norm_x = (target[..., 0] - mu[..., 0]) / sigma[..., 0]
+    norm_y = (target[..., 1] - mu[..., 1]) / sigma[..., 1]
+    one_minus_rho2 = (1.0 - rho.square()).clamp_min(1e-5)
+    z = norm_x.square() + norm_y.square() - 2.0 * rho * norm_x * norm_y
+
+    log_norm = (
+        -torch.log(torch.tensor(2.0 * torch.pi, device=target_xy.device, dtype=target_xy.dtype))
+        - log_sigma[..., 0]
+        - log_sigma[..., 1]
+        - 0.5 * torch.log(one_minus_rho2)
+    )
+    log_prob_components = log_norm - z / (2.0 * one_minus_rho2)
+    log_mix = F.log_softmax(reconstruction.mixture_logits, dim=-1)
+    log_prob = torch.logsumexp(log_mix + log_prob_components, dim=-1)
+    return -log_prob
+
+
+class SketchformerLoss(nn.Module):
+    """Mask-aware reconstruction, pen-state, and optional class loss."""
+
+    def __init__(self, weights: Any) -> None:
+        super().__init__()
+        self.reconstruction_weight = _weight(weights, "reconstruction", 1.0)
+        self.pen_state_weight = _weight(weights, "pen_state", 1.0)
+        self.classification_weight = _weight(weights, "classification", 0.0)
+
+    def forward(self, output: Any, batch: Mapping[str, torch.Tensor]) -> SketchformerLossOutput:
+        if output.reconstruction is None:
+            raise ValueError("Model output does not include reconstruction predictions")
+
+        targets = batch["targets"]
+        valid_mask = batch.get("valid_mask")
+        if valid_mask is None:
+            valid_mask = torch.ones(targets.shape[:2], dtype=torch.bool, device=targets.device)
+        else:
+            valid_mask = valid_mask.to(device=targets.device, dtype=torch.bool)
+
+        target_xy = targets[..., :2]
+        reconstruction = output.reconstruction
+
+        if reconstruction.mixture_logits is not None:
+            reconstruction_per_step = gaussian_mixture_nll(reconstruction, target_xy)
+            reconstruction_loss = masked_mean(reconstruction_per_step, valid_mask)
+        else:
+            reconstruction_loss = masked_mean(
+                F.mse_loss(reconstruction.xy, target_xy, reduction="none"),
+                valid_mask,
+            )
+
+        xy_mse = masked_mean(
+            F.mse_loss(reconstruction.xy, target_xy, reduction="none"),
+            valid_mask,
+        )
+        pen_state_loss = self._pen_state_loss(reconstruction.pen_logits, targets, valid_mask)
+        classification_loss = self._classification_loss(output, batch, targets)
+
+        total = (
+            self.reconstruction_weight * reconstruction_loss
+            + self.pen_state_weight * pen_state_loss
+            + self.classification_weight * classification_loss
+        )
+        return SketchformerLossOutput(
+            total=total,
+            reconstruction=reconstruction_loss,
+            pen_state=pen_state_loss,
+            classification=classification_loss,
+            xy_mse=xy_mse,
+        )
+
+    @staticmethod
+    def _pen_state_loss(
+        pen_logits: torch.Tensor,
+        targets: torch.Tensor,
+        valid_mask: torch.Tensor,
+    ) -> torch.Tensor:
+        pen_targets = targets[..., 2].round().long().clamp(min=0, max=pen_logits.shape[-1] - 1)
+        loss = F.cross_entropy(
+            pen_logits.reshape(-1, pen_logits.shape[-1]),
+            pen_targets.reshape(-1),
+            reduction="none",
+        ).view_as(pen_targets)
+        return masked_mean(loss, valid_mask)
+
+    def _classification_loss(
+        self,
+        output: Any,
+        batch: Mapping[str, torch.Tensor],
+        targets: torch.Tensor,
+    ) -> torch.Tensor:
+        if self.classification_weight <= 0.0 or output.class_logits is None:
+            return targets.new_tensor(0.0)
+        labels = batch.get("labels")
+        if labels is None:
+            raise ValueError("Classification loss is enabled but batch has no labels")
+        return F.cross_entropy(output.class_logits, labels.to(output.class_logits.device).long())
