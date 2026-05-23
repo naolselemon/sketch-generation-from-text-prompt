@@ -5,7 +5,7 @@ input:
   stroke_dim: 3
   continuous_xy: true
   pen_classes: 3
-  max_seq_len: 200
+  max_seq_len: 2048
 
 architecture:
   d_model: 128
@@ -17,20 +17,42 @@ architecture:
   activation: gelu
   norm_first: true
   use_layer_norm: true
+  gradient_checkpointing: true
 
 embedding:
   xy_projection: linear
   pen_embedding_dim: 32
   combine_method: add
-  positional_encoding: learned
+  positional_encoding:
+    type: learned
+    max_length: 2048
+    checkpoint_extension: interpolate_then_random_init
 
 encoder:
   use_attention_mask: true
   use_padding_mask: true
+  attention:
+    implementation: sdpa
+    preferred_backend: flash
+    allow_flash: true
+    allow_memory_efficient: true
+    allow_math_fallback: true
+    sparse:
+      enabled: false
+      pattern: block_local_global
+      block_size: 128
+      local_window: 512
+      global_tokens: 8
 
 decoder:
   autoregressive: false
   blind_decoder_mask: true
+  attention:
+    implementation: sdpa
+    preferred_backend: flash
+    allow_flash: true
+    allow_memory_efficient: true
+    allow_math_fallback: true
 
 heads:
   reconstruction:

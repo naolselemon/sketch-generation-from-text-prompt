@@ -3,6 +3,11 @@ description: Minimal in-repo Sketchformer fine-tuning smoke test.
 
 overrides:
   data:
+    sequence:
+      max_length: 256
+      target_max_length: 256
+      length_curriculum:
+        enabled: false
     batching:
       batch_size: 2
       eval_batch_size: 2
@@ -12,11 +17,14 @@ overrides:
       min_visualization_samples: 2
       reconstruction_samples: 2
   trainer:
+    runtime:
+      precision: 32-true
     training:
       max_epochs: 1
       limit_train_batches: 2
       limit_val_batches: 1
       log_every_n_steps: 1
+      accumulate_grad_batches: 1
     checkpointing:
       save_top_k: 1
     debug:
