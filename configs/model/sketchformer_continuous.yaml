@@ -9,6 +9,7 @@ input:
 
 architecture:
   d_model: 128
+  latent_dim: 256
   num_encoder_layers: 4
   num_decoder_layers: 4
   num_heads: 8

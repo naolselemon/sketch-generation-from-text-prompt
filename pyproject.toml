@@ -31,6 +31,7 @@ include = [
   "integrations.*",
   "metrics",
   "models",
+  "models.*",
   "pipeline",
   "prep_data",
   "prep_data.*",
