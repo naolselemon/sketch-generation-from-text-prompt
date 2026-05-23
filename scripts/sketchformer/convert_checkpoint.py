@@ -22,6 +22,7 @@ def _add_project_to_path() -> Path:
 
 PROJECT_ROOT = _add_project_to_path()
 
+from integrations.pretrained_sketchformer import inspect_tensorflow_checkpoint
 from scripts.sketchformer.config import compose_training_config
 
 
@@ -41,16 +42,23 @@ def main() -> int:
     config = compose_training_config(args.config, experiment=args.experiment)
     source = PROJECT_ROOT / args.source
     output = PROJECT_ROOT / args.output
+    checkpoint = inspect_tensorflow_checkpoint(source)
 
     print(f"model={config['model']['name']}")
     print(f"source={source}")
     print(f"output={output}")
     print(f"source_format={args.source_format}")
+    if args.source_format == "tensorflow":
+        print(f"tensorflow_index={checkpoint.index_file}")
+        print(f"tensorflow_data_shards={len(checkpoint.data_files)}")
+        print(f"tensorflow_checkpoint_complete={checkpoint.exists}")
 
     if args.dry_run:
         return 0
 
     if args.source_format == "tensorflow":
+        if not checkpoint.exists:
+            raise SystemExit(f"Incomplete TensorFlow checkpoint source: {checkpoint.prefix}")
         raise SystemExit(
             "TensorFlow Sketchformer checkpoint conversion needs an explicit "
             "variable mapping table. Use --dry-run for now."
