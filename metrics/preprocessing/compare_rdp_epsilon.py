@@ -13,9 +13,14 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from tqdm import tqdm
 
@@ -33,7 +38,7 @@ from pipeline.vectorization import (
     vectorize_image_with_stats,
 )
 from utils.io import save_stroke5
-from metrics.preprocessing.visualisation import save_original_vs_simplified
+from metrics.visualisation import save_original_vs_simplified
 
 
 _ORDER_FN_MAP = {
