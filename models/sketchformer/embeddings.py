@@ -1,4 +1,4 @@
-"""Input embeddings for continuous stroke3 data."""
+"""Input embeddings for stroke3 and token-dictionary data."""
 
 from __future__ import annotations
 
@@ -31,4 +31,53 @@ class Stroke3Embedding(nn.Module):
 
         x = self.xy_projection(xy) + self.pen_embedding(pen_state)
         x = self.position(x)
+        return self.dropout(x)
+
+
+class TokenEmbedding(nn.Module):
+    """Embed discrete tok-dict sequences into transformer hidden states."""
+
+    def __init__(self, config: SketchformerConfig) -> None:
+        super().__init__()
+        token_config = config.token_dictionary
+        self.token_embedding = nn.Embedding(
+            token_config.vocab_size,
+            config.d_model,
+            padding_idx=token_config.pad_token_id,
+        )
+        self.position = LearnedPositionalEncoding(
+            config.positional_encoding.max_length,
+            config.d_model,
+        )
+        self.dropout = nn.Dropout(config.dropout)
+
+    def forward(self, tokens: torch.Tensor) -> torch.Tensor:
+        if tokens.ndim != 2:
+            raise ValueError("Expected tokens with shape (batch, sequence)")
+
+        x = self.token_embedding(tokens.long())
+        x = self.position(x)
+        return self.dropout(x)
+
+
+class DecoderQueryEmbedding(nn.Module):
+    """Learned decoder queries that avoid leaking target token identities."""
+
+    def __init__(self, config: SketchformerConfig) -> None:
+        super().__init__()
+        self.position = nn.Embedding(
+            config.positional_encoding.max_length,
+            config.d_model,
+        )
+        self.dropout = nn.Dropout(config.dropout)
+
+    def forward(
+        self,
+        batch_size: int,
+        sequence_length: int,
+        *,
+        device: torch.device,
+    ) -> torch.Tensor:
+        positions = torch.arange(sequence_length, device=device)
+        x = self.position(positions).unsqueeze(0).expand(batch_size, -1, -1)
         return self.dropout(x)
