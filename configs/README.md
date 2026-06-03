@@ -22,15 +22,22 @@ The in-repo fine-tuning path targets more sophisticated sketches than the
 short, simple QuickDraw-style drawings used by the original Sketchformer setup.
 For that reason, the base data/model configs are long-sequence capable:
 
-- the model supports sequences up to `2048` stroke3 steps;
-- the anime data config trains at `2048` by default for server-side runs;
+- the default model consumes tok-dict token sequences built from the sketch
+  token dictionary;
+- the model supports sequences up to `2048` tok-dict tokens;
+- the anime tok-dict data config trains at `2048` by default for server-side
+  runs;
 - the smoke-test experiment overrides sequence length down to `256`;
 - attention is configured for PyTorch scaled dot-product attention with Flash
   Attention preferred when the hardware supports it;
-- the anime data config does not build full SDPA padding masks by default, so
+- the anime tok-dict data config does not build full SDPA padding masks by default, so
   long 2048-token runs can stay on the Flash/memory-efficient attention path;
 - sparse attention is represented in config but disabled until the dense
   Flash/SDPA baseline is correct.
+
+`configs/train.yaml` defaults to `anime_tok_dict` plus
+`sketchformer_tok_dict`. Continuous stroke3 configs remain in this folder for
+legacy compatibility, but they are not the native fine-tuning objective.
 
 The default trainer config uses CUDA `16-mixed` precision and TF32-friendly
 runtime settings for an RTX 3090-class server. CPU development should use the
