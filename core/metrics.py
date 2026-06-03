@@ -30,8 +30,29 @@ class ReconstructionMetrics:
         }
 
 
+@dataclass
+class TokenReconstructionMetrics:
+    """Common validation metrics for tok-dict reconstruction."""
+
+    token_loss: torch.Tensor
+    token_accuracy: torch.Tensor
+    token_perplexity: torch.Tensor
+    valid_tokens: torch.Tensor
+
+    def as_log_dict(self, prefix: str = "val") -> dict[str, torch.Tensor]:
+        return {
+            f"{prefix}/token_loss": self.token_loss.detach(),
+            f"{prefix}/token_accuracy": self.token_accuracy.detach(),
+            f"{prefix}/token_perplexity": self.token_perplexity.detach(),
+            f"{prefix}/valid_tokens": self.valid_tokens.detach(),
+        }
+
+
 @torch.no_grad()
-def reconstruction_metrics(output: Any, batch: Mapping[str, torch.Tensor]) -> ReconstructionMetrics:
+def reconstruction_metrics(
+    output: Any,
+    batch: Mapping[str, torch.Tensor],
+) -> ReconstructionMetrics | TokenReconstructionMetrics:
     """Compute mask-aware reconstruction metrics."""
 
     if output.reconstruction is None:
@@ -43,6 +64,28 @@ def reconstruction_metrics(output: Any, batch: Mapping[str, torch.Tensor]) -> Re
         valid_mask = torch.ones(targets.shape[:2], dtype=torch.bool, device=targets.device)
     else:
         valid_mask = valid_mask.to(device=targets.device, dtype=torch.bool)
+
+    token_logits = getattr(output.reconstruction, "token_logits", None)
+    if token_logits is not None:
+        token_targets = targets.to(device=token_logits.device, dtype=torch.long)
+        token_mask = valid_mask.to(device=token_logits.device, dtype=torch.bool)
+        loss = F.cross_entropy(
+            token_logits.reshape(-1, token_logits.shape[-1]),
+            token_targets.reshape(-1),
+            reduction="none",
+        ).view_as(token_targets)
+        token_loss = masked_mean(loss, token_mask)
+        token_predictions = torch.argmax(token_logits, dim=-1)
+        token_accuracy = masked_mean(
+            (token_predictions == token_targets).to(dtype=torch.float32),
+            token_mask,
+        )
+        return TokenReconstructionMetrics(
+            token_loss=token_loss,
+            token_accuracy=token_accuracy,
+            token_perplexity=torch.exp(token_loss.detach().clamp(max=50.0)),
+            valid_tokens=token_mask.sum().to(dtype=torch.float32),
+        )
 
     target_xy = targets[..., :2]
     pred_xy = output.reconstruction.xy
