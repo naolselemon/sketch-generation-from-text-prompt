@@ -1,6 +1,6 @@
 """Native PyTorch Sketchformer-style model components."""
 
-from models.sketchformer.config import SketchformerConfig
+from models.sketchformer.config import SketchformerConfig, TokenDictionaryConfig
 from models.sketchformer.model import SketchformerModel, SketchformerOutput
 from models.sketchformer.pretrained import (
     DEFAULT_PRETRAINED_ROOT,
@@ -18,5 +18,6 @@ __all__ = [
     "SketchformerOutput",
     "TensorFlowCheckpoint",
     "ValidationIssue",
+    "TokenDictionaryConfig",
     "validate_pretrained_assets",
 ]
