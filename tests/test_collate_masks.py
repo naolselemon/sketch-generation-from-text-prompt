@@ -10,6 +10,7 @@ import torch
 from dataloaders import (
     Stroke3Collator,
     StrokeSequenceDataModule,
+    TokenSequenceCollator,
     build_sequence_masks,
     causal_mask,
     lengths_to_valid_mask,
@@ -30,6 +31,12 @@ def _write_chunk(path: Path, lengths: list[int]) -> None:
     sketches = np.asarray([_stroke(length) for length in lengths], dtype=object)
     labels = np.zeros(len(lengths), dtype=np.int32)
     np.savez_compressed(path, x=sketches, y=labels)
+
+
+def _write_token_chunk(path: Path, sequences: list[list[int]]) -> None:
+    tokens = np.asarray([np.asarray(seq, dtype=np.int64) for seq in sequences], dtype=object)
+    labels = np.zeros(len(sequences), dtype=np.int32)
+    np.savez_compressed(path, x=tokens, y=labels)
 
 
 class CollateAndMaskTest(unittest.TestCase):
@@ -105,6 +112,36 @@ class CollateAndMaskTest(unittest.TestCase):
         self.assertIsNone(batch["sdpa_mask"])
         self.assertEqual(batch["valid_mask"].shape, (1, 4))
 
+    def test_token_collator_pads_with_configured_pad_token(self) -> None:
+        samples = [
+            {
+                "tokens": np.asarray([0, 1, 5], dtype=np.int64),
+                "label": 0,
+                "length": 3,
+                "source_file": "a.npz",
+                "source_index": 0,
+            },
+            {
+                "tokens": np.asarray([2, 4, 3, 5], dtype=np.int64),
+                "label": 0,
+                "length": 4,
+                "source_file": "b.npz",
+                "source_index": 1,
+            },
+        ]
+
+        batch = TokenSequenceCollator(
+            max_length=8,
+            pad_token_id=6,
+            pad_to_multiple_of=4,
+        )(samples)
+
+        self.assertEqual(batch["tokens"].shape, (2, 4))
+        self.assertEqual(batch["tokens"][0].tolist(), [0, 1, 5, 6])
+        self.assertEqual(batch["targets"][1].tolist(), [2, 4, 3, 5])
+        self.assertEqual(batch["valid_mask"].sum().item(), 7)
+        self.assertEqual(batch["pad_token_id"], 6)
+
     def test_datamodule_returns_train_and_validation_loaders(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -145,6 +182,50 @@ class CollateAndMaskTest(unittest.TestCase):
             self.assertEqual(train_batch["strokes"].shape[0], 2)
             self.assertEqual(val_batch["strokes"].shape[0], 1)
             self.assertIn("valid_mask", build_sequence_masks([1], max_length=2))
+
+    def test_datamodule_returns_tok_dict_batches(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_token_chunk(root / "train_000.npz", [[0, 1, 5], [2, 4, 5]])
+            _write_token_chunk(root / "valid.npz", [[3, 5]])
+            _write_token_chunk(root / "test.npz", [[1, 5]])
+
+            config = {
+                "dataset": {"root": str(root), "metadata_file": "meta.npz"},
+                "format": {
+                    "type": "tok_dict",
+                    "token_dictionary": {
+                        "eos_token_id": 5,
+                        "pad_token_id": 6,
+                    },
+                },
+                "sequence": {
+                    "max_length": 8,
+                    "truncate_long_sequences": True,
+                    "add_end_token": True,
+                    "pad_to_multiple_of": 4,
+                },
+                "preprocessing": {"max_cached_files": 1},
+                "augmentation": {"enabled": False},
+                "batching": {
+                    "batch_size": 2,
+                    "eval_batch_size": 1,
+                    "num_workers": 0,
+                    "persistent_workers": False,
+                    "drop_last": False,
+                    "bucket_by_length": False,
+                    "pin_memory": False,
+                },
+            }
+
+            datamodule = StrokeSequenceDataModule(config)
+            datamodule.setup("fit")
+            train_batch = next(iter(datamodule.train_dataloader()))
+            val_batch = next(iter(datamodule.val_dataloader()))
+
+            self.assertEqual(train_batch["tokens"].shape[0], 2)
+            self.assertEqual(val_batch["tokens"].shape[0], 1)
+            self.assertEqual(train_batch["pad_token_id"], 6)
 
 
 if __name__ == "__main__":
