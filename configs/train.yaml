@@ -1,6 +1,6 @@
 defaults:
-  - data: anime_stroke3
-  - model: sketchformer_continuous
+  - data: anime_tok_dict
+  - model: sketchformer_tok_dict
   - optimizer: adamw_cosine
   - trainer: single_gpu
   - experiment: smoke_test

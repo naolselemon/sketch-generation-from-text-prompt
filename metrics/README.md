@@ -18,9 +18,9 @@ These modules evaluate the sketch extraction and vectorization pipeline:
 
 These modules support the in-repo Sketchformer fine-tuning path:
 
-- `sketchformer/reconstruction.py` converts model outputs into stroke3
-  predictions, collects target/prediction examples, and writes JSON metric
-  reports.
+- `sketchformer/reconstruction.py` converts continuous outputs or codebook-
+  decoded tok-dict outputs into stroke3 predictions, collects target/prediction
+  examples, and writes JSON metric reports.
 - `sketchformer/visualisation.py` saves target-vs-prediction reconstruction
   plots for qualitative evaluation.
 
@@ -28,17 +28,16 @@ Use the native evaluation script to produce artifacts:
 
 ```bash
 python scripts/sketchformer/evaluate.py \
-  --experiment smoke_test \
-  --checkpoint weights/finetuned/smoke_test/last.pt \
-  --metrics-output weights/finetuned/smoke_test/eval_metrics.json \
-  --plots-output-dir weights/finetuned/smoke_test/reconstruction_plots \
+  --experiment anime_tok_dict_finetune \
+  --checkpoint weights/finetuned/sketchformer-tok-dict-anime/last.pt \
+  --metrics-output weights/finetuned/sketchformer-tok-dict-anime/eval_metrics.json \
+  --plots-output-dir weights/finetuned/sketchformer-tok-dict-anime/reconstruction_plots \
   --num-plots 8
 ```
 
 During early fine-tuning, prioritize:
 
-- reconstruction loss
-- xy mean squared error
-- xy L1 error
-- pen-state accuracy
-- qualitative target-vs-prediction plots
+- token loss
+- token accuracy
+- token perplexity
+- codebook-decoded target-vs-prediction plots

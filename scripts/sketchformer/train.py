@@ -327,7 +327,7 @@ def main() -> int:
     checkpoint_callback = CheckpointCallback(
         checkpoint_dir,
         monitor=str(
-            get_nested(config, "trainer.checkpointing.monitor", "val/reconstruction_loss")
+            get_nested(config, "trainer.checkpointing.monitor", "val/token_loss")
         ),
         mode=str(get_nested(config, "trainer.checkpointing.mode", "min")),
         save_last=bool(get_nested(config, "trainer.checkpointing.save_last", True)),

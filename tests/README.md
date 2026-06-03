@@ -7,10 +7,12 @@ The tests follow the original flat test layout:
 
 ```text
 tests/
+  test_config_composition.py
   test_stroke_sequence_dataset.py
   test_collate_masks.py
   test_sketchformer_forward.py
   test_losses.py
+  test_prepare_sketchformer_tokens.py
   test_checkpoint_mapping.py
   test_train_smoke.py
 ```

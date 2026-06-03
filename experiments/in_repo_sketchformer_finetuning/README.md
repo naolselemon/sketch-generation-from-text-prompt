@@ -18,7 +18,8 @@ criteria must pass before moving to the next stage.
 | Experiment | Purpose | Canonical Config |
 |---|---|---|
 | `smoke_test` | Verify the full in-repo training path on a tiny run. | `configs/experiment/smoke_test.yaml` |
-| `anime_continuous_finetune` | Fine-tune the long-sequence continuous model on anime stroke3 data. | `configs/experiment/anime_continuous_finetune.yaml` |
+| `anime_tok_dict_finetune` | Fine-tune the long-sequence tok-dict model on anime token data. | `configs/experiment/anime_tok_dict_finetune.yaml` |
+| `anime_continuous_finetune` | Legacy continuous stroke3 compatibility experiment. | `configs/experiment/anime_continuous_finetune.yaml` |
 
 ## Stage Order
 
@@ -35,17 +36,17 @@ The smoke test is intentionally short. It confirms the pipeline can load data,
 run the model forward, compute loss, backpropagate, validate, and save a
 checkpoint.
 
-### 2. Anime Continuous Fine-Tuning
+### 2. Anime Tok-Dict Fine-Tuning
 
 Run this after the smoke test passes:
 
 ```bash
-python scripts/sketchformer/train.py --experiment anime_continuous_finetune
+python scripts/sketchformer/train.py --experiment anime_tok_dict_finetune
 ```
 
-This experiment targets longer, more detailed anime sketches. The config starts
-at 1024 stroke steps and is designed to scale toward 2048 steps. Real training
-should run on a CUDA GPU machine; CPU is only practical for smoke tests.
+This experiment targets longer, more detailed anime sketches as tok-dict token
+sequences. The config runs at 2048 tokens by default. Real training should run
+on a CUDA GPU machine; CPU is only practical for smoke tests.
 
 ## Common Commands
 
@@ -59,17 +60,17 @@ Evaluate a checkpoint:
 
 ```bash
 python scripts/sketchformer/evaluate.py \
-  --experiment smoke_test \
-  --checkpoint weights/finetuned/smoke_test/last.pt
+  --experiment anime_tok_dict_finetune \
+  --checkpoint weights/finetuned/sketchformer-tok-dict-anime/last.pt
 ```
 
 Export a checkpoint:
 
 ```bash
 python scripts/sketchformer/export.py \
-  --experiment smoke_test \
-  --checkpoint weights/finetuned/smoke_test/last.pt \
-  --output weights/finetuned/smoke_test/export.pt
+  --experiment anime_tok_dict_finetune \
+  --checkpoint weights/finetuned/sketchformer-tok-dict-anime/last.pt \
+  --output weights/finetuned/sketchformer-tok-dict-anime/export.pt
 ```
 
 Prepare for TensorFlow checkpoint conversion:
@@ -86,7 +87,7 @@ python scripts/sketchformer/convert_checkpoint.py \
 Before trusting a fine-tuning run:
 
 - The dataloader returns non-empty train and validation batches.
-- The model forward pass produces reconstruction output with expected shape.
+- The model forward pass produces token reconstruction logits with expected shape.
 - The loss is finite.
 - One optimizer step completes.
 - Validation metrics are logged.

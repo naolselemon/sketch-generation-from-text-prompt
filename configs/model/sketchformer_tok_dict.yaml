@@ -1,0 +1,76 @@
+name: sketchformer_tok_dict
+framework: pytorch
+
+input:
+  type: tok_dict
+  max_seq_len: 2048
+  token_dictionary:
+    codebook_size: 1000
+    sep_token_id: 1000
+    eos_token_id: 1001
+    pad_token_id: 1002
+    vocab_size: 1003
+
+architecture:
+  d_model: 128
+  latent_dim: 256
+  num_encoder_layers: 4
+  num_decoder_layers: 4
+  num_heads: 8
+  dim_feedforward: 512
+  dropout: 0.1
+  activation: gelu
+  norm_first: true
+  use_layer_norm: true
+  gradient_checkpointing: true
+
+embedding:
+  combine_method: add
+  positional_encoding:
+    type: learned
+    max_length: 2048
+    checkpoint_extension: interpolate_then_random_init
+
+encoder:
+  use_attention_mask: true
+  use_padding_mask: true
+  attention:
+    implementation: sdpa
+    preferred_backend: flash
+    allow_flash: true
+    allow_memory_efficient: true
+    allow_math_fallback: true
+    sparse:
+      enabled: false
+      pattern: block_local_global
+      block_size: 128
+      local_window: 512
+      global_tokens: 8
+
+decoder:
+  autoregressive: false
+  blind_decoder_mask: true
+  attention:
+    implementation: sdpa
+    preferred_backend: flash
+    allow_flash: true
+    allow_memory_efficient: true
+    allow_math_fallback: true
+
+heads:
+  reconstruction:
+    enabled: true
+    target: tok_dict
+  classification:
+    enabled: false
+    num_classes: 345
+    dropout: 0.1
+
+checkpoint:
+  load_converted_weights: false
+  converted_weights_path: null
+  strict: false
+
+compile:
+  enabled: false
+  mode: default

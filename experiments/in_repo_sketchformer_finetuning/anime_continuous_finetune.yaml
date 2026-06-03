@@ -1,11 +1,10 @@
 name: anime_continuous_finetune
-status: planned
+status: legacy
 canonical_config: configs/experiment/anime_continuous_finetune.yaml
 
 purpose:
-  Fine-tune the native continuous Sketchformer model on anime stroke3 data so
-  it can reconstruct and eventually generate sketches more sophisticated than
-  short QuickDraw-style drawings.
+  Legacy compatibility run for the native continuous Sketchformer model on
+  anime stroke3 data. The active native objective is anime_tok_dict_finetune.
 
 research_objective:
   sequence_goal: 1024_to_2048_stroke_steps

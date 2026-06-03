@@ -13,7 +13,8 @@ launch:
   export: "python scripts/sketchformer/export.py --experiment smoke_test --checkpoint weights/finetuned/smoke_test/last.pt --output weights/finetuned/smoke_test/export.pt"
 
 expected_data:
-  root: data/processed/sketchformer-ready-data/stroke3
+  root: data/processed/sketchformer-ready-data/tok-dict
+  token_dictionary: data/processed/sketch_token/codebook.npy
   train: train_*.npz
   valid: valid.npz
   test: test.npz
@@ -27,6 +28,7 @@ expected_artifacts:
 acceptance_criteria:
   - training_command_exits_zero
   - loss_is_finite
+  - token_metrics_are_printed
   - validation_metrics_are_printed
   - checkpoint_last_exists
   - evaluation_command_loads_checkpoint

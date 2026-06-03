@@ -12,8 +12,8 @@ from torch import nn
 def build_model(config: Mapping[str, Any]) -> nn.Module:
     """Build a model from the model config mapping."""
 
-    name = str(config.get("name", "sketchformer_continuous"))
-    if name != "sketchformer_continuous":
+    name = str(config.get("name", "sketchformer_tok_dict"))
+    if name not in {"sketchformer_tok_dict", "sketchformer_continuous"}:
         raise ValueError(f"Unsupported model config name: {name}")
 
     try:

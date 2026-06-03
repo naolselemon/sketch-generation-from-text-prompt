@@ -32,7 +32,7 @@ class TrainScriptSmokeTest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         self.assertIn("experiment=smoke_test", result.stdout)
-        self.assertIn("model=sketchformer_continuous", result.stdout)
+        self.assertIn("model=sketchformer_tok_dict", result.stdout)
         self.assertIn("checkpoint_dir=", result.stdout)
 
 

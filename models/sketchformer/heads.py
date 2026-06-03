@@ -23,6 +23,14 @@ class ReconstructionOutput:
     rho: torch.Tensor | None = None
 
 
+@dataclass
+class TokenReconstructionOutput:
+    """Structured token-dictionary reconstruction output."""
+
+    raw: torch.Tensor
+    token_logits: torch.Tensor
+
+
 class ContinuousReconstructionHead(nn.Module):
     """Predict continuous xy deltas and pen-state logits."""
 
@@ -79,6 +87,18 @@ class ContinuousReconstructionHead(nn.Module):
             log_sigma=log_sigma,
             rho=rho,
         )
+
+
+class TokenReconstructionHead(nn.Module):
+    """Predict one tok-dict vocabulary distribution per sequence position."""
+
+    def __init__(self, config: SketchformerConfig) -> None:
+        super().__init__()
+        self.projection = nn.Linear(config.d_model, config.token_dictionary.vocab_size)
+
+    def forward(self, x: torch.Tensor) -> TokenReconstructionOutput:
+        logits = self.projection(x)
+        return TokenReconstructionOutput(raw=logits, token_logits=logits)
 
 
 class ClassificationHead(nn.Module):

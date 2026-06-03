@@ -54,7 +54,28 @@ def compose_training_config(
     for section, section_override in overrides.items():
         composed[section] = deep_merge(composed.get(section, {}), section_override)
 
+    _sync_token_dictionary_config(composed)
     return composed
+
+
+def _sync_token_dictionary_config(config: dict[str, Any]) -> None:
+    """Keep tok-dict data/model vocabulary IDs from drifting apart."""
+
+    if str(get_nested(config, "data.format.type", "stroke3")) not in {
+        "tok_dict",
+        "token",
+        "tokens",
+    }:
+        return
+
+    token_dictionary = get_nested(config, "data.format.token_dictionary", {})
+    if not token_dictionary:
+        return
+
+    model = config.setdefault("model", {})
+    model_input = model.setdefault("input", {})
+    existing = model_input.get("token_dictionary", {})
+    model_input["token_dictionary"] = deep_merge(existing, token_dictionary)
 
 
 def resolve_device(requested: str = "auto") -> torch.device:

@@ -19,8 +19,10 @@ def _add_project_to_path() -> Path:
 PROJECT_ROOT = _add_project_to_path()
 
 import torch
+import numpy as np
 
 from builders import build_loss, build_model, maybe_compile_model
+from builders.config_utils import get_nested
 from core import average_logs, load_checkpoint, move_to_device
 from core.metrics import reconstruction_metrics
 from dataloaders import StrokeSequenceDataModule
@@ -28,6 +30,7 @@ from metrics.sketchformer.reconstruction import (
     collect_reconstruction_examples,
     write_metrics_report,
 )
+from prep_data.sketch_token.create_token_dict import load_codebook_from_dir
 from scripts.sketchformer.config import (
     compose_training_config,
     format_logs,
@@ -52,6 +55,30 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _load_codebook_for_plots(config: dict[str, Any]) -> Any:
+    if str(get_nested(config, "data.format.type", "stroke3")) not in {
+        "tok_dict",
+        "token",
+        "tokens",
+    }:
+        return None
+
+    codebook_dir = get_nested(config, "data.format.token_dictionary.codebook_dir")
+    codebook_path = get_nested(config, "data.format.token_dictionary.codebook_path")
+    if codebook_dir:
+        codebook, _metadata = load_codebook_from_dir(PROJECT_ROOT / codebook_dir)
+        return codebook
+    if codebook_path:
+        path = Path(codebook_path)
+        if not path.is_absolute():
+            path = PROJECT_ROOT / path
+        return np.load(path)
+    raise ValueError(
+        "plots for tok-dict evaluation require "
+        "data.format.token_dictionary.codebook_dir or codebook_path"
+    )
+
+
 def main() -> int:
     args = parse_args()
     config = compose_training_config(args.config, experiment=args.experiment)
@@ -72,6 +99,7 @@ def main() -> int:
 
     loss_fn = build_loss(config["optimizer"]).to(device)
     model.eval()
+    codebook = _load_codebook_for_plots(config) if args.plots_output_dir else None
 
     logs: list[dict[str, torch.Tensor]] = []
     examples = []
@@ -92,6 +120,7 @@ def main() -> int:
                         output,
                         batch,
                         max_examples=remaining_examples,
+                        codebook=codebook,
                     )
                 )
 

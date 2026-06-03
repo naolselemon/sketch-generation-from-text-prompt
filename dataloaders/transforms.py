@@ -1,4 +1,4 @@
-"""Preprocessing transforms for stroke3 sequence data."""
+"""Preprocessing transforms for stroke3 and tok-dict sequence data."""
 
 from __future__ import annotations
 
@@ -25,6 +25,19 @@ def validate_stroke3(stroke: np.ndarray) -> np.ndarray:
         raise ValueError("Stroke sequence is empty")
     if not np.isfinite(array).all():
         raise ValueError("Stroke sequence contains NaN or infinite values")
+    return array
+
+
+def validate_token_sequence(tokens: np.ndarray) -> np.ndarray:
+    """Validate and return an int64 ``(N,)`` token sequence."""
+
+    array = np.asarray(tokens, dtype=np.int64)
+    if array.ndim != 1:
+        raise ValueError(f"Expected token array with shape (N,), got {array.shape}")
+    if len(array) == 0:
+        raise ValueError("Token sequence is empty")
+    if np.any(array < 0):
+        raise ValueError("Token sequence contains negative token IDs")
     return array
 
 
@@ -130,3 +143,37 @@ class Stroke3Transform:
             raise NotImplementedError("Stroke-level shuffling is not implemented yet")
 
         return stroke
+
+
+@dataclass
+class TokenSequenceTransform:
+    """Callable transform used for tok-dict sequence samples."""
+
+    split: str
+    max_length: int | None = None
+    truncate_long_sequences: bool = True
+    add_end_token: bool = True
+    eos_token_id: int | None = None
+
+    def __call__(self, sample: dict[str, Any]) -> dict[str, Any]:
+        tokens = validate_token_sequence(sample["tokens"])
+
+        if self.add_end_token and self.eos_token_id is not None:
+            if int(tokens[-1]) != int(self.eos_token_id):
+                tokens = np.concatenate(
+                    [tokens, np.asarray([self.eos_token_id], dtype=np.int64)]
+                )
+
+        if self.max_length is not None and len(tokens) > self.max_length:
+            if not self.truncate_long_sequences:
+                raise ValueError(
+                    f"Sequence length {len(tokens)} exceeds max_length={self.max_length}"
+                )
+            tokens = np.array(tokens[: self.max_length], copy=True, dtype=np.int64)
+            if self.add_end_token and self.eos_token_id is not None:
+                tokens[-1] = int(self.eos_token_id)
+
+        transformed = dict(sample)
+        transformed["tokens"] = tokens.astype(np.int64, copy=False)
+        transformed["length"] = int(len(tokens))
+        return transformed

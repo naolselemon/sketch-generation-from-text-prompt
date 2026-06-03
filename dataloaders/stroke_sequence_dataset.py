@@ -1,4 +1,4 @@
-"""PyTorch dataset for Sketchformer-ready stroke3 chunks."""
+"""PyTorch dataset for Sketchformer-ready stroke3 or tok-dict chunks."""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ class StrokeSampleIndex:
 
 
 class StrokeSequenceDataset(Dataset):
-    """Load stroke3 sketches saved as ``x`` and ``y`` arrays in ``.npz`` chunks."""
+    """Load sketch sequences saved as ``x`` and ``y`` arrays in ``.npz`` chunks."""
 
     def __init__(
         self,
@@ -32,11 +32,15 @@ class StrokeSequenceDataset(Dataset):
         train_pattern: str = "train_*.npz",
         valid_file: str = "valid.npz",
         test_file: str = "test.npz",
+        metadata_file: str = "meta.npz",
+        format_type: str = "stroke3",
         transform: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
         max_cached_files: int = 2,
     ) -> None:
         self.root = Path(root)
         self.split = split
+        self.metadata_file = metadata_file
+        self.format_type = format_type
         self.transform = transform
         self.max_cached_files = max(0, int(max_cached_files))
         self._cache: OrderedDict[Path, dict[str, np.ndarray]] = OrderedDict()
@@ -51,16 +55,21 @@ class StrokeSequenceDataset(Dataset):
     def __getitem__(self, item: int) -> dict[str, Any]:
         entry = self.index[item]
         data = self._load_chunk(entry.file_path)
-        stroke = np.asarray(data["x"][entry.local_index], dtype=np.float32)
+        sequence = data["x"][entry.local_index]
         label = int(np.asarray(data["y"][entry.local_index]).reshape(-1)[0])
 
         sample: dict[str, Any] = {
-            "stroke3": stroke,
             "label": label,
-            "length": int(len(stroke)),
+            "length": int(len(sequence)),
             "source_file": str(entry.file_path),
             "source_index": int(entry.local_index),
         }
+        if self.format_type in {"tok_dict", "token", "tokens"}:
+            sample["tokens"] = np.asarray(sequence, dtype=np.int64)
+        elif self.format_type == "stroke3":
+            sample["stroke3"] = np.asarray(sequence, dtype=np.float32)
+        else:
+            raise ValueError("format_type must be one of: stroke3, tok_dict")
         if self.transform is not None:
             sample = self.transform(sample)
         return sample
@@ -105,7 +114,7 @@ class StrokeSequenceDataset(Dataset):
         return index
 
     def _load_metadata(self) -> dict[str, Any]:
-        meta_path = self.root / "meta.npz"
+        meta_path = self.root / self.metadata_file
         if not meta_path.exists():
             return {}
 
