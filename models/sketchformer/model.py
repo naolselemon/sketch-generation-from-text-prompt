@@ -10,12 +10,18 @@ from torch import nn
 
 from models.sketchformer.config import SketchformerConfig
 from models.sketchformer.decoder import LatentExpander, StrokeDecoder
-from models.sketchformer.embeddings import Stroke3Embedding
+from models.sketchformer.embeddings import (
+    DecoderQueryEmbedding,
+    Stroke3Embedding,
+    TokenEmbedding,
+)
 from models.sketchformer.encoder import AttentionPool, StrokeEncoder
 from models.sketchformer.heads import (
     ClassificationHead,
     ContinuousReconstructionHead,
     ReconstructionOutput,
+    TokenReconstructionHead,
+    TokenReconstructionOutput,
 )
 
 
@@ -26,7 +32,7 @@ class SketchformerOutput:
     embedding: torch.Tensor
     encoded: torch.Tensor
     decoded: torch.Tensor
-    reconstruction: ReconstructionOutput | None
+    reconstruction: ReconstructionOutput | TokenReconstructionOutput | None
     class_logits: torch.Tensor | None
 
 
@@ -38,8 +44,12 @@ class SketchformerModel(nn.Module):
         config.validate()
         self.config = config
 
-        self.input_embedding = Stroke3Embedding(config)
-        self.target_embedding = Stroke3Embedding(config)
+        if self._uses_token_input:
+            self.input_embedding = TokenEmbedding(config)
+            self.target_embedding = DecoderQueryEmbedding(config)
+        else:
+            self.input_embedding = Stroke3Embedding(config)
+            self.target_embedding = Stroke3Embedding(config)
         self.encoder = StrokeEncoder(config)
         self.pool = AttentionPool(config.d_model, config.latent_dim)
         self.latent_expander = LatentExpander(
@@ -49,12 +59,24 @@ class SketchformerModel(nn.Module):
         )
         self.decoder = StrokeDecoder(config)
 
-        self.reconstruction_head = (
-            ContinuousReconstructionHead(config) if config.reconstruction.enabled else None
-        )
+        self.reconstruction_head = self._build_reconstruction_head(config)
         self.classification_head = (
             ClassificationHead(config) if config.classification.enabled else None
         )
+
+    @property
+    def _uses_token_input(self) -> bool:
+        return self.config.input_mode in {"tok_dict", "token", "tokens"}
+
+    @staticmethod
+    def _build_reconstruction_head(
+        config: SketchformerConfig,
+    ) -> ContinuousReconstructionHead | TokenReconstructionHead | None:
+        if not config.reconstruction.enabled:
+            return None
+        if config.reconstruction.target in {"tok_dict", "token", "tokens"}:
+            return TokenReconstructionHead(config)
+        return ContinuousReconstructionHead(config)
 
     @classmethod
     def from_mapping(cls, config: dict[str, Any]) -> "SketchformerModel":
@@ -73,7 +95,7 @@ class SketchformerModel(nn.Module):
             targets = batch.get("targets", targets)
             valid_mask = batch.get("valid_mask", valid_mask)
             attention_mask = batch.get("sdpa_mask", attention_mask)
-            strokes = batch["strokes"]
+            strokes = batch["tokens"] if self._uses_token_input else batch["strokes"]
 
         if targets is None:
             targets = strokes
@@ -129,7 +151,14 @@ class SketchformerModel(nn.Module):
         self_attention_mask: torch.Tensor | None = None,
         valid_mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        target_input = self.target_embedding(targets)
+        if self._uses_token_input:
+            target_input = self.target_embedding(
+                targets.shape[0],
+                targets.shape[1],
+                device=embedding.device,
+            )
+        else:
+            target_input = self.target_embedding(targets)
         memory = self.latent_expander(embedding, target_input.shape[1])
         cross_attention_mask = (
             None
