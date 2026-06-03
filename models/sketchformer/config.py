@@ -55,6 +55,7 @@ class PositionalEncodingConfig:
 @dataclass(frozen=True)
 class ReconstructionHeadConfig:
     enabled: bool = True
+    target: str = "continuous"
     xy_distribution: str = "gaussian_mixture"
     num_mixtures: int = 20
     predict_pen_state: bool = True
@@ -64,6 +65,7 @@ class ReconstructionHeadConfig:
         config = config or {}
         return cls(
             enabled=bool(_get(config, "enabled", True)),
+            target=str(_get(config, "target", _get(config, "type", "continuous"))),
             xy_distribution=str(_get(config, "xy_distribution", "gaussian_mixture")),
             num_mixtures=int(_get(config, "num_mixtures", 20)),
             predict_pen_state=bool(_get(config, "predict_pen_state", True)),
@@ -87,11 +89,46 @@ class ClassificationHeadConfig:
 
 
 @dataclass(frozen=True)
+class TokenDictionaryConfig:
+    codebook_size: int = 1000
+    sep_token_id: int = 1000
+    eos_token_id: int = 1001
+    pad_token_id: int = 1002
+    vocab_size: int = 1003
+
+    @classmethod
+    def from_mapping(cls, config: Mapping[str, Any] | None) -> "TokenDictionaryConfig":
+        config = config or {}
+        codebook_size = int(_get(config, "codebook_size", _get(config, "K", 1000)))
+        sep_token_id = int(_get(config, "sep_token_id", codebook_size))
+        eos_token_id = int(_get(config, "eos_token_id", codebook_size + 1))
+        pad_token_id = int(_get(config, "pad_token_id", codebook_size + 2))
+        vocab_size = int(
+            _get(
+                config,
+                "vocab_size",
+                max(codebook_size, sep_token_id, eos_token_id, pad_token_id) + 1,
+            )
+        )
+        return cls(
+            codebook_size=codebook_size,
+            sep_token_id=sep_token_id,
+            eos_token_id=eos_token_id,
+            pad_token_id=pad_token_id,
+            vocab_size=vocab_size,
+        )
+
+
+@dataclass(frozen=True)
 class SketchformerConfig:
     name: str = "sketchformer_continuous"
+    input_mode: str = "stroke3"
     stroke_dim: int = 3
     pen_classes: int = 3
     max_seq_len: int = 2048
+    token_dictionary: TokenDictionaryConfig = field(
+        default_factory=TokenDictionaryConfig
+    )
     d_model: int = 128
     latent_dim: int = 256
     num_encoder_layers: int = 4
@@ -131,9 +168,13 @@ class SketchformerConfig:
 
         return cls(
             name=str(_get(config, "name", "sketchformer_continuous")),
+            input_mode=str(_get(input_cfg, "type", _get(input_cfg, "mode", "stroke3"))),
             stroke_dim=int(_get(input_cfg, "stroke_dim", 3)),
             pen_classes=int(_get(input_cfg, "pen_classes", 3)),
             max_seq_len=int(_get(input_cfg, "max_seq_len", 2048)),
+            token_dictionary=TokenDictionaryConfig.from_mapping(
+                input_cfg.get("token_dictionary", {})
+            ),
             d_model=int(_get(architecture, "d_model", 128)),
             latent_dim=int(_get(architecture, "latent_dim", 256)),
             num_encoder_layers=int(_get(architecture, "num_encoder_layers", 4)),
@@ -165,8 +206,28 @@ class SketchformerConfig:
         )
 
     def validate(self) -> None:
-        if self.stroke_dim != 3:
-            raise ValueError("Only stroke3 input is supported for the first model version")
+        if self.input_mode == "stroke3":
+            if self.stroke_dim != 3:
+                raise ValueError("stroke3 input requires input.stroke_dim=3")
+            if self.reconstruction.target not in {"continuous", "stroke3"}:
+                raise ValueError("stroke3 input requires a continuous reconstruction target")
+        elif self.input_mode in {"tok_dict", "token", "tokens"}:
+            special_ids = (
+                self.token_dictionary.sep_token_id,
+                self.token_dictionary.eos_token_id,
+                self.token_dictionary.pad_token_id,
+            )
+            if len(set(special_ids)) != len(special_ids):
+                raise ValueError("tok_dict special token IDs must be distinct")
+            if min(special_ids) < self.token_dictionary.codebook_size:
+                raise ValueError("tok_dict special token IDs must follow motion tokens")
+            max_special = max(special_ids)
+            if self.token_dictionary.vocab_size <= max_special:
+                raise ValueError("token dictionary vocab_size must include special tokens")
+            if self.reconstruction.target not in {"tok_dict", "token", "tokens"}:
+                raise ValueError("tok_dict input requires a token reconstruction target")
+        else:
+            raise ValueError("input.type must be one of: stroke3, tok_dict")
         if self.d_model % self.num_heads != 0:
             raise ValueError("d_model must be divisible by num_heads")
         if self.combine_method != "add":
