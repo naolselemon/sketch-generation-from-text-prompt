@@ -23,6 +23,12 @@ def _write_chunk(path: Path, lengths: list[int]) -> None:
     np.savez_compressed(path, x=sketches, y=labels)
 
 
+def _write_token_chunk(path: Path, sequences: list[list[int]]) -> None:
+    tokens = np.asarray([np.asarray(seq, dtype=np.int64) for seq in sequences], dtype=object)
+    labels = np.zeros(len(sequences), dtype=np.int32)
+    np.savez_compressed(path, x=tokens, y=labels)
+
+
 class StrokeSequenceDatasetTest(unittest.TestCase):
     def test_loads_sketchformer_ready_train_chunks(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -40,6 +46,23 @@ class StrokeSequenceDatasetTest(unittest.TestCase):
             self.assertEqual(sample["label"], 0)
             self.assertEqual(sample["length"], 3)
             self.assertEqual(dataset.metadata["n_classes"], 1)
+
+    def test_loads_tok_dict_train_chunks(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_token_chunk(root / "train_000.npz", [[0, 1, 5], [2, 4, 5]])
+
+            dataset = StrokeSequenceDataset(
+                root,
+                split="train",
+                format_type="tok_dict",
+            )
+
+            self.assertEqual(len(dataset), 2)
+            sample = dataset[0]
+            self.assertEqual(sample["tokens"].tolist(), [0, 1, 5])
+            self.assertNotIn("stroke3", sample)
+            self.assertEqual(sample["length"], 3)
 
     def test_raises_for_missing_split_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
