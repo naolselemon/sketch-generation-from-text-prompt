@@ -10,9 +10,9 @@ from typing import Any
 
 from torch.utils.data import DataLoader, Sampler
 
-from dataloaders.collate import Stroke3Collator
+from dataloaders.collate import Stroke3Collator, TokenSequenceCollator
 from dataloaders.stroke_sequence_dataset import StrokeSequenceDataset
-from dataloaders.transforms import Stroke3Transform
+from dataloaders.transforms import Stroke3Transform, TokenSequenceTransform
 
 
 def _to_plain_config(config: Any) -> Any:
@@ -110,6 +110,14 @@ class StrokeSequenceDataModule:
         self.valid_dataset: StrokeSequenceDataset | None = None
         self.test_dataset: StrokeSequenceDataset | None = None
 
+    @property
+    def format_type(self) -> str:
+        return str(_get(self.config, "format.type", "stroke3"))
+
+    @property
+    def uses_token_format(self) -> bool:
+        return self.format_type in {"tok_dict", "token", "tokens"}
+
     def setup(self, stage: str | None = None) -> None:
         if stage in {None, "fit"}:
             self.train_dataset = self._make_dataset("train")
@@ -140,15 +148,30 @@ class StrokeSequenceDataModule:
         if not root.is_absolute():
             root = self.project_root / root
 
-        transform = Stroke3Transform(
-            split=split,
-            max_length=int(_get(self.config, "sequence.max_length")),
-            truncate_long_sequences=bool(_get(self.config, "sequence.truncate_long_sequences", True)),
-            normalize=bool(_get(self.config, "preprocessing.normalize_by_bounds", True)),
-            delta_clip=float(_get(self.config, "preprocessing.delta_clip", 1000.0)),
-            augmentation=_get(self.config, "augmentation", {}),
-            seed=self.seed,
-        )
+        if self.uses_token_format:
+            transform = TokenSequenceTransform(
+                split=split,
+                max_length=int(_get(self.config, "sequence.max_length")),
+                truncate_long_sequences=bool(
+                    _get(self.config, "sequence.truncate_long_sequences", True)
+                ),
+                add_end_token=bool(_get(self.config, "sequence.add_end_token", True)),
+                eos_token_id=int(
+                    _get(self.config, "format.token_dictionary.eos_token_id")
+                ),
+            )
+        else:
+            transform = Stroke3Transform(
+                split=split,
+                max_length=int(_get(self.config, "sequence.max_length")),
+                truncate_long_sequences=bool(
+                    _get(self.config, "sequence.truncate_long_sequences", True)
+                ),
+                normalize=bool(_get(self.config, "preprocessing.normalize_by_bounds", True)),
+                delta_clip=float(_get(self.config, "preprocessing.delta_clip", 1000.0)),
+                augmentation=_get(self.config, "augmentation", {}),
+                seed=self.seed,
+            )
 
         return StrokeSequenceDataset(
             root=root,
@@ -156,6 +179,8 @@ class StrokeSequenceDataModule:
             train_pattern=str(_get(self.config, "dataset.train_pattern", "train_*.npz")),
             valid_file=str(_get(self.config, "dataset.valid_file", "valid.npz")),
             test_file=str(_get(self.config, "dataset.test_file", "test.npz")),
+            metadata_file=str(_get(self.config, "dataset.metadata_file", "meta.npz")),
+            format_type=self.format_type,
             transform=transform,
             max_cached_files=int(_get(self.config, "preprocessing.max_cached_files", 2)),
         )
@@ -174,13 +199,28 @@ class StrokeSequenceDataModule:
         if num_workers == 0:
             persistent_workers = False
 
-        collate_fn = Stroke3Collator(
-            max_length=int(_get(self.config, "sequence.max_length")),
-            pad_value=float(_get(self.config, "sequence.pad_value", 0.0)),
-            pad_to_multiple_of=int(_get(self.config, "sequence.pad_to_multiple_of", 8)),
-            causal_attention=False,
-            build_attention_mask=bool(_get(self.config, "sequence.build_attention_mask", True)),
-        )
+        if self.uses_token_format:
+            collate_fn = TokenSequenceCollator(
+                max_length=int(_get(self.config, "sequence.max_length")),
+                pad_token_id=int(
+                    _get(self.config, "format.token_dictionary.pad_token_id")
+                ),
+                pad_to_multiple_of=int(_get(self.config, "sequence.pad_to_multiple_of", 8)),
+                causal_attention=False,
+                build_attention_mask=bool(
+                    _get(self.config, "sequence.build_attention_mask", True)
+                ),
+            )
+        else:
+            collate_fn = Stroke3Collator(
+                max_length=int(_get(self.config, "sequence.max_length")),
+                pad_value=float(_get(self.config, "sequence.pad_value", 0.0)),
+                pad_to_multiple_of=int(_get(self.config, "sequence.pad_to_multiple_of", 8)),
+                causal_attention=False,
+                build_attention_mask=bool(
+                    _get(self.config, "sequence.build_attention_mask", True)
+                ),
+            )
 
         if is_train and bool(_get(self.config, "batching.bucket_by_length", False)):
             batch_sampler = LengthBucketBatchSampler(
