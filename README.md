@@ -21,9 +21,9 @@ to run on the GPU server.
 | Area | Status |
 |---|---|
 | Anime image preprocessing | Implemented. Downloads portraits, extracts line art, filters sketches, vectorizes contours, orders strokes, and writes stroke-5 files. |
-| Sketchformer-ready data | Implemented. Converts stroke-5 sketches into chunked stroke3 `.npz` files with train/valid/test splits. |
+| Sketchformer-ready data | Implemented. Builds a sketch token dictionary and converts stroke-5 sketches into chunked tok-dict `.npz` files with train/valid/test splits. Continuous stroke3 prep remains available for legacy experiments. |
 | Original Sketchformer handoff | Implemented as a Docker command launcher. The bundled image is CPU-oriented; GPU use requires a custom compatible image. |
-| Native PyTorch Sketchformer | Implemented for continuous stroke3 reconstruction with SDPA attention, gradient checkpointing, length-bucketed loading, Gaussian-mixture reconstruction, pen-state loss, evaluation, and export. |
+| Native PyTorch Sketchformer | Implemented for tok-dict reconstruction with SDPA attention, gradient checkpointing, length-bucketed loading, masked token cross entropy, token accuracy/perplexity metrics, codebook-decoded plots, evaluation, and export. |
 | Native fine-tuning from converted TF weights | Supported only after a converted PyTorch or Safetensors checkpoint exists. The TensorFlow-to-PyTorch mapping is scaffolded but not implemented yet. |
 | Text prompt conditioning | Not implemented in the current codebase. The present focus is anime sketch sequence modeling. |
 
@@ -36,7 +36,8 @@ Danbooru2019 portraits
   -> vector contours
   -> ordered drawing paths
   -> stroke-5 arrays
-  -> Sketchformer-style stroke3 chunks
+  -> sketch token dictionary
+  -> Sketchformer-style tok-dict chunks
   -> original Sketchformer or native PyTorch training
 ```
 
@@ -45,19 +46,19 @@ Danbooru2019 portraits
 ```text
 .
 ├── configs/
-│   ├── data/                    Dataset paths, stroke3 format, batching
+│   ├── data/                    Dataset paths, tok-dict format, batching
 │   ├── experiment/              Smoke test and anime fine-tuning presets
 │   ├── model/                   Native Sketchformer architecture config
 │   ├── optimizer/               Optimizer, scheduler, and loss weights
 │   └── trainer/                 Precision, checkpointing, runtime settings
 │
-├── prep_data/                   Download, extraction, filtering, stroke3 prep
+├── prep_data/                   Download, extraction, filtering, tok-dict prep
 ├── pipeline/                    Vectorization, ordering, timing, stroke-5 export
 ├── metrics/                     Preprocessing and reconstruction evaluation
 ├── utils/                       Shared IO, paths, and tokenization helpers
 │
 ├── models/sketchformer/         Native PyTorch Sketchformer-style model
-├── dataloaders/                 Stroke3 dataset, masks, collation, loaders
+├── dataloaders/                 Token/stroke datasets, masks, collation, loaders
 ├── core/                        Losses, metrics, checkpointing, train helpers
 ├── builders/                    Model, optimizer, scheduler, loss factories
 ├── scripts/sketchformer/        Native train, evaluate, export, inspect CLIs
@@ -75,7 +76,7 @@ Danbooru2019 portraits
 
 | Area | Main Paths | Purpose |
 |---|---|---|
-| Data preparation | `prep_data/`, `pipeline/`, `scripts/prepare_data/` | Build clean anime sketch data from images and export stroke-5/stroke3 files. |
+| Data preparation | `prep_data/`, `pipeline/`, `scripts/prepare_data/` | Build clean anime sketch data from images and export stroke-5, token dictionary, and tok-dict files. |
 | Native training | `models/sketchformer/`, `dataloaders/`, `core/`, `builders/`, `scripts/sketchformer/` | Rebuilt PyTorch Sketchformer-style training path for long anime stroke sequences. |
 | Configuration | `configs/` | Compose reusable data, model, optimizer, trainer, and experiment settings. |
 | Legacy integration | `integrations/original_sketchformer/`, `scripts/integrations/`, `sketchformer/` | Run the original TensorFlow Sketchformer checkout for compatibility experiments. |
@@ -147,7 +148,26 @@ Vectorize, order, time, and export stroke-5 sketches:
 tts-run-pipeline
 ```
 
-Convert stroke-5 files into Sketchformer-style stroke3 chunks:
+Build the sketch token dictionary from stroke-5 deltas:
+
+```bash
+tts-create-sketch-token-dict \
+  --source-dir data/processed/stroke5 \
+  --output-dir data/processed/sketch_token \
+  --K 1000
+```
+
+Convert stroke-5 files into Sketchformer-style tok-dict chunks:
+
+```bash
+tts-prepare-sketchformer-tokens \
+  --source-dir data/processed/stroke5 \
+  --token-dict-dir data/processed/sketch_token \
+  --target-dir data/processed/sketchformer-ready-data/tok-dict \
+  --n-chunks 10
+```
+
+Continuous stroke3 chunks are still supported for legacy experiments:
 
 ```bash
 tts-prepare-sketchformer \
@@ -156,10 +176,10 @@ tts-prepare-sketchformer \
   --n-chunks 10
 ```
 
-Expected stroke3 output:
+Expected tok-dict output:
 
 ```text
-data/processed/sketchformer-ready-data/stroke3/
+data/processed/sketchformer-ready-data/tok-dict/
 ├── train_000.npz
 ├── train_001.npz
 ├── ...
@@ -172,14 +192,15 @@ data/processed/sketchformer-ready-data/stroke3/
 
 The native path is the preferred direction for RTX 3090 training. It uses:
 
-- stroke3 variable-length batches with SDPA-compatible masks
+- tok-dict variable-length batches with SDPA-compatible masks
 - length-bucketed sampling to reduce padding
 - gradient checkpointing for long sequences
 - CUDA mixed precision with `16-mixed` by default
 - TF32 matmul enabled by default on CUDA
 - full SDPA padding-mask construction disabled by default for 2048-token anime
   runs, which helps PyTorch stay on Flash or memory-efficient attention kernels
-- Gaussian-mixture xy reconstruction plus pen-state cross entropy
+- masked token cross entropy over the sketch token dictionary
+- token accuracy and token perplexity validation metrics
 
 CPU dry run:
 
@@ -191,7 +212,7 @@ RTX 3090 training:
 
 ```bash
 tts-train-sketchformer \
-  --experiment anime_continuous_finetune \
+  --experiment anime_tok_dict_finetune \
   --device cuda \
   --precision 16-mixed
 ```
@@ -200,25 +221,17 @@ Resume a native checkpoint:
 
 ```bash
 tts-train-sketchformer \
-  --experiment anime_continuous_finetune \
+  --experiment anime_tok_dict_finetune \
   --device cuda \
-  --resume weights/finetuned/sketchformer-continuous-anime/last.pt
-```
-
-Load a converted native checkpoint when available:
-
-```bash
-tts-train-sketchformer \
-  --experiment anime_continuous_finetune \
-  --device cuda \
-  --pretrained weights/pretrained/sketchformer_continuous.safetensors
+  --resume weights/finetuned/sketchformer-tok-dict-anime/last.pt
 ```
 
 Evaluate:
 
 ```bash
 tts-evaluate-sketchformer \
-  --checkpoint weights/finetuned/sketchformer-continuous-anime/best.pt \
+  --experiment anime_tok_dict_finetune \
+  --checkpoint weights/finetuned/sketchformer-tok-dict-anime/best.pt \
   --split valid \
   --device cuda \
   --metrics-output data/processed/evaluations/native_valid_metrics.json \
@@ -229,8 +242,9 @@ Export weights:
 
 ```bash
 tts-export-sketchformer \
-  --checkpoint weights/finetuned/sketchformer-continuous-anime/best.pt \
-  --output weights/finetuned/sketchformer-continuous-anime/model.safetensors
+  --experiment anime_tok_dict_finetune \
+  --checkpoint weights/finetuned/sketchformer-tok-dict-anime/best.pt \
+  --output weights/finetuned/sketchformer-tok-dict-anime/model.safetensors
 ```
 
 ## Original Sketchformer Integration
@@ -295,16 +309,16 @@ Important configs:
 | File | Purpose |
 |---|---|
 | `configs/train.yaml` | Root composed training config. |
-| `configs/model/sketchformer_continuous.yaml` | Native model architecture and reconstruction head. |
-| `configs/data/anime_stroke3.yaml` | Stroke3 dataset, sequence length, batching, and augmentation. |
+| `configs/model/sketchformer_tok_dict.yaml` | Native tok-dict model architecture and token reconstruction head. |
+| `configs/data/anime_tok_dict.yaml` | Tok-dict dataset, token dictionary IDs, sequence length, and batching. |
 | `configs/trainer/single_gpu.yaml` | Single-GPU runtime, precision, checkpointing, and logging settings. |
 | `configs/experiment/smoke_test.yaml` | Tiny CPU-friendly dry-run/smoke settings. |
-| `configs/experiment/anime_continuous_finetune.yaml` | RTX 3090-oriented native training experiment. |
+| `configs/experiment/anime_tok_dict_finetune.yaml` | RTX 3090-oriented native tok-dict training experiment. |
+| `configs/experiment/anime_continuous_finetune.yaml` | Legacy continuous stroke3 experiment. |
 
-The anime experiment currently trains or resumes the native PyTorch model. To
-use original TensorFlow Sketchformer weights in the native path, first produce a
-converted PyTorch/Safetensors checkpoint; the conversion CLI is currently a safe
-inspection scaffold.
+The default root config trains the native tok-dict model. To use a custom token
+dictionary size, update `data.format.token_dictionary` or provide an experiment
+override; config composition copies those IDs into `model.input.token_dictionary`.
 
 ## Formats
 
@@ -314,14 +328,18 @@ Stroke-5:
 [dx, dy, p1, p2, p3]
 ```
 
-Stroke3:
+Tok-dict:
 
 ```text
-[dx, dy, pen_state]
+0..K-1 = codebook motion tokens
+K      = stroke separator token
+K + 1  = end-of-sketch token
+K + 2  = padding token
 ```
 
-The native model consumes continuous stroke3 data. Pen states are expected to be
-integer-like values in `[0, 2]`.
+The native model consumes tok-dict token sequences by default. Continuous
+stroke3 remains available through `anime_stroke3` and
+`sketchformer_continuous` for compatibility checks.
 
 ## Verification
 
@@ -337,8 +355,8 @@ validate config composition without launching full training.
 
 ## Known Gaps
 
-- TensorFlow-to-PyTorch Sketchformer checkpoint conversion still needs the
-  explicit variable mapping table.
-- The native model is reconstruction-first; text prompt conditioning is not
-  wired into the architecture yet.
+- TensorFlow-to-PyTorch Sketchformer checkpoint conversion targets the legacy
+  continuous checkpoint path, not the tok-dict objective.
+- The native model is tok-dict reconstruction-first; text prompt conditioning is
+  not wired into the architecture yet.
 - The legacy Docker image is CPU-oriented and intentionally conservative.
