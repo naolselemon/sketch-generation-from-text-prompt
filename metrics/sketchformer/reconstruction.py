@@ -12,6 +12,8 @@ from typing import Any
 import numpy as np
 import torch
 
+from utils.tokenizer import decode_tokens
+
 
 @dataclass(frozen=True)
 class ReconstructionExample:
@@ -30,6 +32,8 @@ def prediction_to_stroke3(output: Any) -> torch.Tensor:
 
     if output.reconstruction is None:
         raise ValueError("Model output does not include reconstruction predictions")
+    if getattr(output.reconstruction, "token_logits", None) is not None:
+        raise ValueError("Token predictions require a codebook; use collect_reconstruction_examples")
 
     xy = output.reconstruction.xy
     pen = torch.argmax(output.reconstruction.pen_logits, dim=-1).to(dtype=xy.dtype)
@@ -52,13 +56,26 @@ def collect_reconstruction_examples(
     batch: Mapping[str, Any],
     *,
     max_examples: int,
+    codebook: np.ndarray | None = None,
 ) -> list[ReconstructionExample]:
     """Collect a small CPU copy of target and predicted stroke3 sequences."""
 
     if max_examples <= 0:
         return []
 
-    predictions = prediction_to_stroke3(output).detach().cpu().numpy()
+    token_logits = (
+        None
+        if output.reconstruction is None
+        else getattr(output.reconstruction, "token_logits", None)
+    )
+    if token_logits is not None and codebook is None:
+        raise ValueError("A tok-dict codebook is required to plot token reconstructions")
+
+    predictions = (
+        torch.argmax(token_logits, dim=-1).detach().cpu().numpy()
+        if token_logits is not None
+        else prediction_to_stroke3(output).detach().cpu().numpy()
+    )
     targets = batch["targets"].detach().cpu().numpy()
     valid_mask = batch.get("valid_mask")
     lengths = _batch_lengths(batch, valid_mask)
@@ -78,10 +95,23 @@ def collect_reconstruction_examples(
         length = min(int(lengths[row]), targets.shape[1])
         label = int(labels[row]) if labels is not None else None
         source_index = int(source_indices[row]) if source_indices is not None else row
+        if token_logits is not None:
+            assert codebook is not None
+            target = decode_tokens(
+                np.asarray(targets[row, :length], dtype=np.int64),
+                codebook,
+            )
+            prediction = decode_tokens(
+                np.asarray(predictions[row, :length], dtype=np.int64),
+                codebook,
+            )
+        else:
+            target = np.asarray(targets[row, :length], dtype=np.float32)
+            prediction = np.asarray(predictions[row, :length], dtype=np.float32)
         examples.append(
             ReconstructionExample(
-                target=np.asarray(targets[row, :length], dtype=np.float32),
-                prediction=np.asarray(predictions[row, :length], dtype=np.float32),
+                target=target,
+                prediction=prediction,
                 length=length,
                 source_file=str(source_files[row]),
                 source_index=source_index,
