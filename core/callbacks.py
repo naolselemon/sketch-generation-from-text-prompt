@@ -16,7 +16,7 @@ from core.checkpointing import save_checkpoint
 class BestMetricTracker:
     """Track whether a monitored metric improved."""
 
-    monitor: str = "val/reconstruction_loss"
+    monitor: str = "val/token_loss"
     mode: str = "min"
     best: float | None = None
 
@@ -44,7 +44,7 @@ class CheckpointCallback:
     """Save last and best checkpoints from a simple training loop."""
 
     directory: str | Path
-    monitor: str = "val/reconstruction_loss"
+    monitor: str = "val/token_loss"
     mode: str = "min"
     save_last: bool = True
 
