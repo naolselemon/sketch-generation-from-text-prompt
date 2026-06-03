@@ -22,6 +22,7 @@ gradient:
   accumulate_batches: 1
 
 loss_weights:
+  token: 1.0
   reconstruction: 1.0
   pen_state: 1.0
   classification: 0.0
