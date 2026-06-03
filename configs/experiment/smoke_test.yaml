@@ -1,5 +1,5 @@
 name: smoke_test
-description: Minimal in-repo Sketchformer fine-tuning smoke test.
+description: Minimal in-repo tok-dict Sketchformer fine-tuning smoke test.
 
 overrides:
   data:
