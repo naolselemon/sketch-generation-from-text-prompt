@@ -20,16 +20,30 @@ class SketchformerLossOutput:
     pen_state: torch.Tensor
     classification: torch.Tensor
     xy_mse: torch.Tensor
+    token_accuracy: torch.Tensor | None = None
+    token_perplexity: torch.Tensor | None = None
+    valid_tokens: torch.Tensor | None = None
+    kind: str = "continuous"
 
     def as_log_dict(self, prefix: str = "") -> dict[str, torch.Tensor]:
         name = f"{prefix}/" if prefix else ""
-        return {
+        logs = {
             f"{name}loss": self.total.detach(),
             f"{name}reconstruction_loss": self.reconstruction.detach(),
-            f"{name}pen_state_loss": self.pen_state.detach(),
             f"{name}classification_loss": self.classification.detach(),
-            f"{name}xy_mse": self.xy_mse.detach(),
         }
+        if self.kind == "tok_dict":
+            logs[f"{name}token_loss"] = self.reconstruction.detach()
+            if self.token_accuracy is not None:
+                logs[f"{name}token_accuracy"] = self.token_accuracy.detach()
+            if self.token_perplexity is not None:
+                logs[f"{name}token_perplexity"] = self.token_perplexity.detach()
+            if self.valid_tokens is not None:
+                logs[f"{name}valid_tokens"] = self.valid_tokens.detach()
+        else:
+            logs[f"{name}pen_state_loss"] = self.pen_state.detach()
+            logs[f"{name}xy_mse"] = self.xy_mse.detach()
+        return logs
 
 
 def _weight(weights: Any, name: str, default: float) -> float:
@@ -86,6 +100,7 @@ class SketchformerLoss(nn.Module):
     def __init__(self, weights: Any) -> None:
         super().__init__()
         self.reconstruction_weight = _weight(weights, "reconstruction", 1.0)
+        self.token_weight = _weight(weights, "token", self.reconstruction_weight)
         self.pen_state_weight = _weight(weights, "pen_state", 1.0)
         self.classification_weight = _weight(weights, "classification", 0.0)
 
@@ -100,8 +115,12 @@ class SketchformerLoss(nn.Module):
         else:
             valid_mask = valid_mask.to(device=targets.device, dtype=torch.bool)
 
-        target_xy = targets[..., :2]
         reconstruction = output.reconstruction
+        token_logits = getattr(reconstruction, "token_logits", None)
+        if token_logits is not None:
+            return self._token_loss(output, batch, token_logits, targets, valid_mask)
+
+        target_xy = targets[..., :2]
 
         if reconstruction.mixture_logits is not None:
             reconstruction_per_step = gaussian_mixture_nll(reconstruction, target_xy)
@@ -130,6 +149,53 @@ class SketchformerLoss(nn.Module):
             pen_state=pen_state_loss,
             classification=classification_loss,
             xy_mse=xy_mse,
+        )
+
+    def _token_loss(
+        self,
+        output: Any,
+        batch: Mapping[str, torch.Tensor],
+        token_logits: torch.Tensor,
+        targets: torch.Tensor,
+        valid_mask: torch.Tensor,
+    ) -> SketchformerLossOutput:
+        token_targets = targets.to(device=token_logits.device, dtype=torch.long)
+        token_mask = valid_mask.to(device=token_logits.device, dtype=torch.bool)
+        if token_logits.shape[:2] != token_targets.shape:
+            raise ValueError(
+                "Token logits and targets must agree on batch/sequence shape: "
+                f"{token_logits.shape[:2]} != {token_targets.shape}"
+            )
+
+        loss = F.cross_entropy(
+            token_logits.reshape(-1, token_logits.shape[-1]),
+            token_targets.reshape(-1),
+            reduction="none",
+        ).view_as(token_targets)
+        token_loss = masked_mean(loss, token_mask)
+        token_predictions = torch.argmax(token_logits, dim=-1)
+        token_accuracy = masked_mean(
+            (token_predictions == token_targets).to(dtype=torch.float32),
+            token_mask,
+        )
+        token_perplexity = torch.exp(token_loss.detach().clamp(max=50.0))
+        classification_loss = self._classification_loss(output, batch, token_logits)
+        zero = token_loss.new_tensor(0.0)
+
+        total = (
+            self.token_weight * token_loss
+            + self.classification_weight * classification_loss
+        )
+        return SketchformerLossOutput(
+            total=total,
+            reconstruction=token_loss,
+            pen_state=zero,
+            classification=classification_loss,
+            xy_mse=zero,
+            token_accuracy=token_accuracy,
+            token_perplexity=token_perplexity,
+            valid_tokens=token_mask.sum().to(dtype=torch.float32),
+            kind="tok_dict",
         )
 
     @staticmethod
