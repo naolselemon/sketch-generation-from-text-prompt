@@ -50,7 +50,7 @@ class StrokeSequenceDatasetTest(unittest.TestCase):
     def test_loads_tok_dict_train_chunks(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            _write_token_chunk(root / "train_000.npz", [[0, 1, 5], [2, 4, 5]])
+            _write_token_chunk(root / "train_000.npz", [[1002, 1, 1003], [1002, 2, 1001, 1003]])
 
             dataset = StrokeSequenceDataset(
                 root,
@@ -60,7 +60,7 @@ class StrokeSequenceDatasetTest(unittest.TestCase):
 
             self.assertEqual(len(dataset), 2)
             sample = dataset[0]
-            self.assertEqual(sample["tokens"].tolist(), [0, 1, 5])
+            self.assertEqual(sample["tokens"].tolist(), [1002, 1, 1003])
             self.assertNotIn("stroke3", sample)
             self.assertEqual(sample["length"], 3)
 

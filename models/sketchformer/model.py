@@ -34,6 +34,8 @@ class SketchformerOutput:
     decoded: torch.Tensor
     reconstruction: ReconstructionOutput | TokenReconstructionOutput | None
     class_logits: torch.Tensor | None
+    loss_targets: torch.Tensor | None = None
+    loss_valid_mask: torch.Tensor | None = None
 
 
 class SketchformerModel(nn.Module):
@@ -46,16 +48,26 @@ class SketchformerModel(nn.Module):
 
         if self._uses_token_input:
             self.input_embedding = TokenEmbedding(config)
-            self.target_embedding = DecoderQueryEmbedding(config)
+            self.target_embedding = (
+                TokenEmbedding(config)
+                if config.decoder_autoregressive
+                else DecoderQueryEmbedding(config)
+            )
         else:
             self.input_embedding = Stroke3Embedding(config)
             self.target_embedding = Stroke3Embedding(config)
         self.encoder = StrokeEncoder(config)
-        self.pool = AttentionPool(config.d_model, config.latent_dim)
-        self.latent_expander = LatentExpander(
+        self.pool = AttentionPool(
+            config.d_model,
             config.latent_dim,
+            mode=config.pooling_mode,
+            hidden_dim=config.pool_hidden_dim,
+        )
+        self.latent_expander = LatentExpander(
+            config.pool_output_dim,
             config.d_model,
             config.max_seq_len,
+            mode=config.latent_expander_mode,
         )
         self.decoder = StrokeDecoder(config)
 
@@ -108,10 +120,26 @@ class SketchformerModel(nn.Module):
 
         encoded = self.encode(strokes, attention_mask=attention_mask)
         embedding = self.pool(encoded, valid_mask=valid_mask)
+        decoder_targets = targets
+        decoder_valid_mask = valid_mask
+        loss_targets = None
+        loss_valid_mask = None
+        if self._uses_token_input and self.config.decoder_autoregressive:
+            if targets.shape[1] < 2:
+                raise ValueError("autoregressive token reconstruction requires sequence length >= 2")
+            decoder_targets = targets[:, :-1]
+            decoder_valid_mask = valid_mask[:, :-1]
+            loss_targets = targets[:, 1:]
+            loss_valid_mask = loss_targets != self.config.token_dictionary.pad_token_id
+
         decoded = self.decode(
             embedding,
-            targets,
-            self_attention_mask=attention_mask,
+            decoder_targets,
+            self_attention_mask=(
+                self._token_decoder_attention_mask(decoder_valid_mask)
+                if self._uses_token_input and self.config.decoder_autoregressive
+                else attention_mask
+            ),
             valid_mask=valid_mask,
         )
 
@@ -132,6 +160,8 @@ class SketchformerModel(nn.Module):
             decoded=decoded,
             reconstruction=reconstruction,
             class_logits=class_logits,
+            loss_targets=loss_targets,
+            loss_valid_mask=loss_valid_mask,
         )
 
     def encode(
@@ -152,18 +182,30 @@ class SketchformerModel(nn.Module):
         valid_mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
         if self._uses_token_input:
-            target_input = self.target_embedding(
-                targets.shape[0],
-                targets.shape[1],
-                device=embedding.device,
-            )
+            if self.config.decoder_autoregressive:
+                target_input = self.target_embedding(targets)
+            else:
+                target_input = self.target_embedding(
+                    targets.shape[0],
+                    targets.shape[1],
+                    device=embedding.device,
+                )
         else:
             target_input = self.target_embedding(targets)
-        memory = self.latent_expander(embedding, target_input.shape[1])
+        memory_length = (
+            self.config.max_seq_len
+            if self.config.latent_expander_mode == "tf_dense"
+            else target_input.shape[1]
+        )
+        memory = self.latent_expander(embedding, memory_length)
         cross_attention_mask = (
             None
             if self.config.blind_decoder_mask
-            else self._cross_attention_mask(valid_mask, target_input.shape[1])
+            else self._cross_attention_mask(
+                valid_mask,
+                target_input.shape[1],
+                memory.shape[1],
+            )
         )
         return self.decoder(
             target_input,
@@ -173,11 +215,35 @@ class SketchformerModel(nn.Module):
         )
 
     @staticmethod
+    def _token_decoder_attention_mask(valid_mask: torch.Tensor) -> torch.Tensor:
+        if valid_mask.dtype != torch.bool:
+            valid_mask = valid_mask.to(dtype=torch.bool)
+        batch_size, sequence_length = valid_mask.shape
+        allowed = valid_mask.unsqueeze(1).expand(batch_size, sequence_length, sequence_length)
+        causal = torch.ones(
+            (sequence_length, sequence_length),
+            dtype=torch.bool,
+            device=valid_mask.device,
+        ).tril()
+        return (allowed & causal).unsqueeze(1)
+
+    @staticmethod
     def _cross_attention_mask(
         valid_mask: torch.Tensor | None,
-        sequence_length: int,
+        target_length: int,
+        source_length: int,
     ) -> torch.Tensor | None:
         if valid_mask is None:
             return None
         batch_size = valid_mask.shape[0]
-        return valid_mask.unsqueeze(1).expand(batch_size, sequence_length, sequence_length).unsqueeze(1)
+        source_mask = valid_mask
+        if source_mask.shape[1] < source_length:
+            pad = torch.zeros(
+                (batch_size, source_length - source_mask.shape[1]),
+                dtype=torch.bool,
+                device=source_mask.device,
+            )
+            source_mask = torch.cat([source_mask, pad], dim=1)
+        elif source_mask.shape[1] > source_length:
+            source_mask = source_mask[:, :source_length]
+        return source_mask.unsqueeze(1).expand(batch_size, target_length, source_length).unsqueeze(1)

@@ -14,10 +14,10 @@ tqdm>=4.66
 PyYAML>=6.0
 typer>=0.12
 rich>=13.7
-tabulate>=0.9
+tabulate>=0.8.7
 python_tsp>=0.4
 tsplib95>=0.7
-networkx>=3.0
+networkx>=2.8, <3
 
 # Sketch extraction
 controlnet_aux>=0.0.9

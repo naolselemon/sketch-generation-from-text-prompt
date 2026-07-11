@@ -23,7 +23,16 @@ def _activation(name: str) -> Callable[[torch.Tensor], torch.Tensor]:
 class SDPAAttention(nn.Module):
     """Multi-head attention backed by ``scaled_dot_product_attention``."""
 
-    def __init__(self, d_model: int, num_heads: int, dropout: float) -> None:
+    def __init__(
+        self,
+        d_model: int,
+        num_heads: int,
+        dropout: float,
+        *,
+        query_dim: int | None = None,
+        key_dim: int | None = None,
+        value_dim: int | None = None,
+    ) -> None:
         super().__init__()
         if d_model % num_heads != 0:
             raise ValueError("d_model must be divisible by num_heads")
@@ -33,9 +42,9 @@ class SDPAAttention(nn.Module):
         self.head_dim = d_model // num_heads
         self.dropout = float(dropout)
 
-        self.q_proj = nn.Linear(d_model, d_model)
-        self.k_proj = nn.Linear(d_model, d_model)
-        self.v_proj = nn.Linear(d_model, d_model)
+        self.q_proj = nn.Linear(query_dim or d_model, d_model)
+        self.k_proj = nn.Linear(key_dim or d_model, d_model)
+        self.v_proj = nn.Linear(value_dim or d_model, d_model)
         self.out_proj = nn.Linear(d_model, d_model)
 
     def forward(
@@ -94,8 +103,8 @@ class EncoderBlock(nn.Module):
             config.dropout,
             config.activation,
         )
-        self.norm1 = nn.LayerNorm(config.d_model)
-        self.norm2 = nn.LayerNorm(config.d_model)
+        self.norm1 = nn.LayerNorm(config.d_model, eps=config.layer_norm_eps)
+        self.norm2 = nn.LayerNorm(config.d_model, eps=config.layer_norm_eps)
         self.dropout1 = nn.Dropout(config.dropout)
         self.dropout2 = nn.Dropout(config.dropout)
 
@@ -121,7 +130,11 @@ class StrokeEncoder(nn.Module):
         self.layers = nn.ModuleList(
             [EncoderBlock(config) for _ in range(config.num_encoder_layers)]
         )
-        self.final_norm = nn.LayerNorm(config.d_model)
+        self.final_norm = (
+            nn.LayerNorm(config.d_model, eps=config.layer_norm_eps)
+            if config.use_final_norm
+            else nn.Identity()
+        )
 
     def forward(self, x: torch.Tensor, attention_mask: torch.Tensor | None = None) -> torch.Tensor:
         for layer in self.layers:
@@ -135,15 +148,37 @@ class StrokeEncoder(nn.Module):
 class AttentionPool(nn.Module):
     """Mask-aware attention pooling from sequence states to one latent vector."""
 
-    def __init__(self, d_model: int, latent_dim: int) -> None:
+    def __init__(
+        self,
+        d_model: int,
+        latent_dim: int,
+        *,
+        mode: str = "projected",
+        hidden_dim: int | None = None,
+    ) -> None:
         super().__init__()
-        self.score = nn.Linear(d_model, 1)
-        self.projection = nn.Linear(d_model, latent_dim)
+        self.mode = mode
+        if mode == "projected":
+            self.score = nn.Linear(d_model, 1)
+            self.projection = nn.Linear(d_model, latent_dim)
+        elif mode == "tf_self_attn_v1":
+            hidden = int(hidden_dim or latent_dim)
+            self.W_attn = nn.Parameter(torch.empty(d_model, hidden))
+            self.b_attn = nn.Parameter(torch.zeros(hidden))
+            self.V_attn = nn.Parameter(torch.empty(hidden, 1))
+            nn.init.normal_(self.W_attn)
+            nn.init.uniform_(self.V_attn)
+        else:
+            raise ValueError("mode must be one of: projected, tf_self_attn_v1")
 
     def forward(self, x: torch.Tensor, valid_mask: torch.Tensor | None = None) -> torch.Tensor:
-        scores = self.score(x).squeeze(-1)
+        if self.mode == "projected":
+            scores = self.score(x).squeeze(-1)
+        else:
+            scores = torch.tanh(x @ self.W_attn + self.b_attn) @ self.V_attn
+            scores = scores.squeeze(-1)
         if valid_mask is not None:
             scores = scores.masked_fill(~valid_mask, torch.finfo(scores.dtype).min)
         weights = torch.softmax(scores, dim=-1)
         pooled = torch.sum(x * weights.unsqueeze(-1), dim=1)
-        return self.projection(pooled)
+        return self.projection(pooled) if self.mode == "projected" else pooled

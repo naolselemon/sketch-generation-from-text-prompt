@@ -90,6 +90,32 @@ class SketchformerLossTest(unittest.TestCase):
         self.assertEqual(logs["train/token_accuracy"].item(), 1.0)
         self.assertEqual(logs["train/valid_tokens"].item(), 2.0)
 
+    def test_token_reconstruction_loss_uses_shifted_model_targets(self) -> None:
+        logits = torch.tensor(
+            [
+                [
+                    [0.0, 4.0, 0.0],
+                    [0.0, 0.0, 4.0],
+                ]
+            ],
+            dtype=torch.float32,
+        )
+        output = SimpleNamespace(
+            reconstruction=SimpleNamespace(token_logits=logits),
+            class_logits=None,
+            loss_targets=torch.tensor([[1, 2]], dtype=torch.long),
+            loss_valid_mask=torch.tensor([[True, True]]),
+        )
+        batch = {
+            "targets": torch.tensor([[9, 1, 2]], dtype=torch.long),
+            "valid_mask": torch.tensor([[True, True, True]]),
+        }
+
+        loss = SketchformerLoss({"token": 1.0})(output, batch)
+
+        self.assertLess(loss.reconstruction.item(), 0.1)
+        self.assertEqual(loss.valid_tokens.item(), 2.0)
+
 
 if __name__ == "__main__":
     unittest.main()

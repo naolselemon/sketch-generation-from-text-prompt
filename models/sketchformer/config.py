@@ -91,30 +91,43 @@ class ClassificationHeadConfig:
 @dataclass(frozen=True)
 class TokenDictionaryConfig:
     codebook_size: int = 1000
-    sep_token_id: int = 1000
-    eos_token_id: int = 1001
-    pad_token_id: int = 1002
-    vocab_size: int = 1003
+    motion_token_offset: int = 1
+    pad_token_id: int = 0
+    sep_token_id: int = 1001
+    sos_token_id: int = 1002
+    eos_token_id: int = 1003
+    vocab_size: int = 1004
 
     @classmethod
     def from_mapping(cls, config: Mapping[str, Any] | None) -> "TokenDictionaryConfig":
         config = config or {}
         codebook_size = int(_get(config, "codebook_size", _get(config, "K", 1000)))
-        sep_token_id = int(_get(config, "sep_token_id", codebook_size))
-        eos_token_id = int(_get(config, "eos_token_id", codebook_size + 1))
-        pad_token_id = int(_get(config, "pad_token_id", codebook_size + 2))
+        motion_token_offset = int(_get(config, "motion_token_offset", 1))
+        pad_token_id = int(_get(config, "pad_token_id", 0))
+        sep_token_id = int(_get(config, "sep_token_id", motion_token_offset + codebook_size))
+        sos_token_id = int(_get(config, "sos_token_id", sep_token_id + 1))
+        eos_token_id = int(_get(config, "eos_token_id", sos_token_id + 1))
         vocab_size = int(
             _get(
                 config,
                 "vocab_size",
-                max(codebook_size, sep_token_id, eos_token_id, pad_token_id) + 1,
+                max(
+                    motion_token_offset + codebook_size - 1,
+                    sep_token_id,
+                    sos_token_id,
+                    eos_token_id,
+                    pad_token_id,
+                )
+                + 1,
             )
         )
         return cls(
             codebook_size=codebook_size,
-            sep_token_id=sep_token_id,
-            eos_token_id=eos_token_id,
+            motion_token_offset=motion_token_offset,
             pad_token_id=pad_token_id,
+            sep_token_id=sep_token_id,
+            sos_token_id=sos_token_id,
+            eos_token_id=eos_token_id,
             vocab_size=vocab_size,
         )
 
@@ -138,7 +151,12 @@ class SketchformerConfig:
     dropout: float = 0.1
     activation: str = "gelu"
     norm_first: bool = True
+    use_final_norm: bool = True
+    layer_norm_eps: float = 1e-5
     gradient_checkpointing: bool = True
+    pooling_mode: str = "projected"
+    pool_hidden_dim: int = 256
+    latent_expander_mode: str = "projected_position"
     pen_embedding_dim: int = 32
     combine_method: str = "add"
     positional_encoding: PositionalEncodingConfig = field(
@@ -146,6 +164,7 @@ class SketchformerConfig:
     )
     encoder_attention: AttentionConfig = field(default_factory=AttentionConfig)
     decoder_attention: AttentionConfig = field(default_factory=AttentionConfig)
+    decoder_autoregressive: bool = False
     blind_decoder_mask: bool = True
     reconstruction: ReconstructionHeadConfig = field(
         default_factory=ReconstructionHeadConfig
@@ -184,8 +203,17 @@ class SketchformerConfig:
             dropout=float(_get(architecture, "dropout", 0.1)),
             activation=str(_get(architecture, "activation", "gelu")),
             norm_first=bool(_get(architecture, "norm_first", True)),
+            use_final_norm=bool(_get(architecture, "use_final_norm", True)),
+            layer_norm_eps=float(_get(architecture, "layer_norm_eps", 1e-5)),
             gradient_checkpointing=bool(
                 _get(architecture, "gradient_checkpointing", True)
+            ),
+            pooling_mode=str(_get(architecture, "pooling_mode", "projected")),
+            pool_hidden_dim=int(
+                _get(architecture, "pool_hidden_dim", _get(architecture, "latent_dim", 256))
+            ),
+            latent_expander_mode=str(
+                _get(architecture, "latent_expander_mode", "projected_position")
             ),
             pen_embedding_dim=int(_get(embedding, "pen_embedding_dim", 32)),
             combine_method=str(_get(embedding, "combine_method", "add")),
@@ -194,6 +222,7 @@ class SketchformerConfig:
             ),
             encoder_attention=AttentionConfig.from_mapping(encoder.get("attention", {})),
             decoder_attention=AttentionConfig.from_mapping(decoder.get("attention", {})),
+            decoder_autoregressive=bool(_get(decoder, "autoregressive", False)),
             blind_decoder_mask=bool(_get(decoder, "blind_decoder_mask", True)),
             reconstruction=ReconstructionHeadConfig.from_mapping(
                 heads.get("reconstruction", {})
@@ -213,17 +242,26 @@ class SketchformerConfig:
                 raise ValueError("stroke3 input requires a continuous reconstruction target")
         elif self.input_mode in {"tok_dict", "token", "tokens"}:
             special_ids = (
-                self.token_dictionary.sep_token_id,
-                self.token_dictionary.eos_token_id,
                 self.token_dictionary.pad_token_id,
+                self.token_dictionary.sep_token_id,
+                self.token_dictionary.sos_token_id,
+                self.token_dictionary.eos_token_id,
             )
             if len(set(special_ids)) != len(special_ids):
                 raise ValueError("tok_dict special token IDs must be distinct")
-            if min(special_ids) < self.token_dictionary.codebook_size:
-                raise ValueError("tok_dict special token IDs must follow motion tokens")
+            motion_start = self.token_dictionary.motion_token_offset
+            motion_end = motion_start + self.token_dictionary.codebook_size
+            if motion_start < 0:
+                raise ValueError("tok_dict motion_token_offset must be non-negative")
+            for token_id in special_ids:
+                if motion_start <= token_id < motion_end:
+                    raise ValueError("tok_dict special token IDs must not overlap motion tokens")
             max_special = max(special_ids)
+            max_motion = self.token_dictionary.motion_token_offset + self.token_dictionary.codebook_size - 1
             if self.token_dictionary.vocab_size <= max_special:
                 raise ValueError("token dictionary vocab_size must include special tokens")
+            if self.token_dictionary.vocab_size <= max_motion:
+                raise ValueError("token dictionary vocab_size must include motion tokens")
             if self.reconstruction.target not in {"tok_dict", "token", "tokens"}:
                 raise ValueError("tok_dict input requires a token reconstruction target")
         else:
@@ -232,7 +270,15 @@ class SketchformerConfig:
             raise ValueError("d_model must be divisible by num_heads")
         if self.combine_method != "add":
             raise ValueError("Only embedding.combine_method=add is currently supported")
-        if self.positional_encoding.type != "learned":
-            raise ValueError("Only learned positional encoding is currently supported")
+        if self.positional_encoding.type not in {"learned", "sinusoidal"}:
+            raise ValueError("positional encoding must be one of: learned, sinusoidal")
         if self.max_seq_len > self.positional_encoding.max_length:
             raise ValueError("max_seq_len exceeds positional encoding max_length")
+        if self.pooling_mode not in {"projected", "tf_self_attn_v1"}:
+            raise ValueError("pooling_mode must be one of: projected, tf_self_attn_v1")
+        if self.latent_expander_mode not in {"projected_position", "tf_dense"}:
+            raise ValueError("latent_expander_mode must be one of: projected_position, tf_dense")
+
+    @property
+    def pool_output_dim(self) -> int:
+        return self.d_model if self.pooling_mode == "tf_self_attn_v1" else self.latent_dim

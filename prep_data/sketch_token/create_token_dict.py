@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import pickle
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -68,6 +70,8 @@ def save_codebook(
     output_dir: Path,
     K: int,
     n_samples: int,
+    *,
+    source: str | None = None,
 ) -> tuple[Path, Path]:
     """Persist the codebook array and a companion metadata JSON."""
     output_dir = Path(output_dir)
@@ -84,6 +88,16 @@ def save_codebook(
         "codebook_shape": list(codebook.shape),
         "timestamp": datetime.now(tz=timezone.utc).isoformat(),
     }
+    if source is not None:
+        metadata["source"] = source
+        metadata["token_layout"] = {
+            "pad_token_id": 0,
+            "motion_token_offset": 1,
+            "sep_token_id": K + 1,
+            "sos_token_id": K + 2,
+            "eos_token_id": K + 3,
+            "vocab_size": K + 4,
+        }
     with open(meta_path, "w") as fh:
         json.dump(metadata, fh, indent=2)
 
@@ -102,6 +116,27 @@ def load_codebook_from_dir(sketch_token_dir: Path) -> tuple[np.ndarray, dict]:
     with open(sketch_token_dir / "metadata.json") as fh:
         metadata = json.load(fh)
     return codebook, metadata
+
+
+def load_original_token_dict_centers(token_dict_path: Path) -> np.ndarray:
+    """Load cluster centers from the original Sketchformer sklearn pickle."""
+
+    try:
+        import sklearn.cluster._kmeans as kmeans_module
+
+        sys.modules.setdefault("sklearn.cluster.k_means_", kmeans_module)
+    except Exception:
+        pass
+
+    with Path(token_dict_path).open("rb") as handle:
+        token_dict = pickle.load(handle, encoding="latin1")
+    centers = getattr(token_dict, "cluster_centers_", None)
+    if centers is None:
+        raise ValueError(f"Original token dictionary has no cluster_centers_: {token_dict_path}")
+    centers = np.asarray(centers, dtype=np.float32)
+    if centers.ndim != 2 or centers.shape[1] != 2:
+        raise ValueError(f"Expected original token centers with shape (K, 2), got {centers.shape}")
+    return centers
 
 
 def load_stroke5_arrays(source_dir: Path) -> list[np.ndarray]:
@@ -127,11 +162,29 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", default=DEFAULT_SKETCH_TOKEN_DIR)
     parser.add_argument("--K", type=int, default=1000)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--source-token-dict-pkl",
+        default=None,
+        help="Export centers from the released Sketchformer token_dict.pkl instead of fitting K-means.",
+    )
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
+    if args.source_token_dict_pkl:
+        codebook = load_original_token_dict_centers(Path(args.source_token_dict_pkl))
+        npy_path, meta_path = save_codebook(
+            codebook,
+            Path(args.output_dir),
+            K=len(codebook),
+            n_samples=len(codebook),
+            source=str(args.source_token_dict_pkl),
+        )
+        print(f"Saved released Sketchformer codebook: {npy_path}")
+        print(f"Saved metadata: {meta_path}")
+        return 0
+
     stroke5_arrays = load_stroke5_arrays(Path(args.source_dir))
     codebook = build_codebook(stroke5_arrays, K=args.K, random_state=args.seed)
     npy_path, meta_path = save_codebook(

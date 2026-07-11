@@ -60,7 +60,7 @@ def make_sdpa_self_attention_mask(
     allowed = valid_mask.unsqueeze(1).expand(batch_size, sequence_length, sequence_length)
     if causal:
         allowed = allowed & causal_mask(sequence_length, device=valid_mask.device)
-    return allowed.unsqueeze(1)
+    return allowed.unsqueeze(1).contiguous()
 
 
 def build_sequence_masks(

@@ -24,6 +24,7 @@ def truncate_tokens(
     tokens: np.ndarray,
     *,
     max_length: int | None,
+    sep_token_id: int,
     eos_token_id: int,
 ) -> np.ndarray:
     sequence = np.asarray(tokens, dtype=np.int64)
@@ -33,7 +34,10 @@ def truncate_tokens(
         raise ValueError("--max-length must be positive")
 
     truncated = np.array(sequence[:max_length], copy=True, dtype=np.int64)
-    truncated[-1] = int(eos_token_id)
+    if max_length == 1:
+        truncated[-1] = int(eos_token_id)
+    else:
+        truncated[-2:] = [int(sep_token_id), int(eos_token_id)]
     return truncated
 
 
@@ -81,10 +85,12 @@ def main() -> int:
 
     codebook, codebook_metadata = load_codebook_from_dir(token_dict_dir)
     codebook_size = int(len(codebook))
-    sep_token_id = codebook_size
-    eos_token_id = codebook_size + 1
-    pad_token_id = codebook_size + 2
-    vocab_size = codebook_size + 3
+    motion_token_offset = 1
+    pad_token_id = 0
+    sep_token_id = codebook_size + 1
+    sos_token_id = codebook_size + 2
+    eos_token_id = codebook_size + 3
+    vocab_size = codebook_size + 4
 
     file_list = sorted(source_path.glob("*.npz"))
     if not file_list:
@@ -94,6 +100,7 @@ def main() -> int:
         truncate_tokens(
             encode_stroke5(load_stroke5_file(path), codebook),
             max_length=args.max_length,
+            sep_token_id=sep_token_id,
             eos_token_id=eos_token_id,
         )
         for path in file_list
@@ -123,9 +130,11 @@ def main() -> int:
         target_path / "meta.npz",
         format="tok_dict",
         codebook_size=codebook_size,
-        sep_token_id=sep_token_id,
-        eos_token_id=eos_token_id,
+        motion_token_offset=motion_token_offset,
         pad_token_id=pad_token_id,
+        sep_token_id=sep_token_id,
+        sos_token_id=sos_token_id,
+        eos_token_id=eos_token_id,
         vocab_size=vocab_size,
         codebook_metadata=np.asarray(codebook_metadata, dtype=object),
         class_names=np.asarray(["anime"], dtype=object),

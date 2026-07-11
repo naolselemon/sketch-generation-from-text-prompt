@@ -17,18 +17,34 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 
-def stroke3_to_points(stroke3: np.ndarray) -> np.ndarray:
-    """Convert relative stroke3 deltas into absolute xy points."""
+def _stroke_array_and_pen_lift(strokes: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Return stroke deltas and pen-lift mask for stroke3 or stroke5 arrays."""
 
-    array = np.asarray(stroke3, dtype=np.float32)
-    if array.ndim != 2 or array.shape[1] != 3:
-        raise ValueError(f"Expected stroke3 array with shape (N, 3), got {array.shape}")
-    return np.cumsum(array[:, :2], axis=0)
+    array = np.asarray(strokes, dtype=np.float32)
+    if array.ndim != 2 or array.shape[1] not in {3, 5}:
+        raise ValueError(
+            "Expected stroke array with shape (N, 3) or (N, 5), "
+            f"got {array.shape}"
+        )
+    if array.shape[1] == 5:
+        end_mask = array[:, 4] >= 0.5
+        pen_lift = np.asarray((array[:, 3] >= 0.5) | end_mask, dtype=bool)
+        return array[:, :2], pen_lift
+
+    pen_lift = np.asarray(array[:, 2] >= 0.5, dtype=bool)
+    return array[:, :2], pen_lift
+
+
+def stroke3_to_points(stroke3: np.ndarray) -> np.ndarray:
+    """Convert relative stroke3 or stroke5 deltas into absolute xy points."""
+
+    deltas, _ = _stroke_array_and_pen_lift(stroke3)
+    return np.cumsum(deltas, axis=0)
 
 
 def _plot_stroke3(ax: plt.Axes, stroke3: np.ndarray, title: str) -> None:
-    points = stroke3_to_points(stroke3)
-    pen_lift = np.asarray(stroke3[:, 2] >= 0.5, dtype=bool)
+    deltas, pen_lift = _stroke_array_and_pen_lift(stroke3)
+    points = np.cumsum(deltas, axis=0)
 
     if len(points) == 0:
         ax.text(0.5, 0.5, "empty", ha="center", va="center")

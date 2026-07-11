@@ -23,7 +23,7 @@ short, simple QuickDraw-style drawings used by the original Sketchformer setup.
 For that reason, the base data/model configs are long-sequence capable:
 
 - the default model consumes tok-dict token sequences built from the sketch
-  token dictionary;
+  token dictionary using the released TensorFlow token ID layout;
 - the model supports sequences up to `2048` tok-dict tokens;
 - the anime tok-dict data config trains at `2048` by default for server-side
   runs;
@@ -34,6 +34,11 @@ For that reason, the base data/model configs are long-sequence capable:
   long 2048-token runs can stay on the Flash/memory-efficient attention path;
 - sparse attention is represented in config but disabled until the dense
   Flash/SDPA baseline is correct.
+
+For checkpoint-compatible runs, `data/processed/sketch_token/codebook.npy`
+must be exported from `sketchformer/prep_data/sketch_token/token_dict.pkl`.
+The token IDs are `PAD=0`, motion tokens `1..1000`, `SEP=1001`,
+`SOS=1002`, and `EOS=1003`.
 
 `configs/train.yaml` defaults to `anime_tok_dict` plus
 `sketchformer_tok_dict`. Continuous stroke3 configs remain in this folder for

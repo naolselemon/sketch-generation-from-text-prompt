@@ -76,8 +76,17 @@ def collect_reconstruction_examples(
         if token_logits is not None
         else prediction_to_stroke3(output).detach().cpu().numpy()
     )
-    targets = batch["targets"].detach().cpu().numpy()
-    valid_mask = batch.get("valid_mask")
+    target_tensor = (
+        output.loss_targets
+        if getattr(output, "loss_targets", None) is not None
+        else batch["targets"]
+    )
+    targets = target_tensor.detach().cpu().numpy()
+    valid_mask = (
+        output.loss_valid_mask
+        if getattr(output, "loss_valid_mask", None) is not None
+        else batch.get("valid_mask")
+    )
     lengths = _batch_lengths(batch, valid_mask)
     if not lengths:
         lengths = [targets.shape[1]] * targets.shape[0]

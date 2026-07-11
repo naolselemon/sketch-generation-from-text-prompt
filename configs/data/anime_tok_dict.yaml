@@ -13,19 +13,22 @@ format:
     codebook_dir: data/processed/sketch_token
     codebook_path: data/processed/sketch_token/codebook.npy
     codebook_size: 1000
-    sep_token_id: 1000
-    eos_token_id: 1001
-    pad_token_id: 1002
-    vocab_size: 1003
+    motion_token_offset: 1
+    pad_token_id: 0
+    sep_token_id: 1001
+    sos_token_id: 1002
+    eos_token_id: 1003
+    vocab_size: 1004
 
 sequence:
   max_length: 2048
   target_max_length: 2048
-  pad_value: 1002
+  pad_value: 0
   pad_to_multiple_of: 8
   truncate_long_sequences: true
+  add_start_token: true
   add_end_token: true
-  build_attention_mask: false
+  build_attention_mask: true
 
 batching:
   batch_size: 2

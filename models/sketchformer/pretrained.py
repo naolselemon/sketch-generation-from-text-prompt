@@ -1,10 +1,4 @@
-"""Pretrained Sketchformer asset inspection for the native model path.
-
-The native PyTorch fine-tuning path eventually needs converted pretrained
-weights. Until the variable mapping is implemented, this module gives the repo
-a native-model place to validate and describe the original TensorFlow
-checkpoint files, config, and generated evaluation artifacts.
-"""
+"""Pretrained Sketchformer asset inspection for the native model path."""
 
 from __future__ import annotations
 

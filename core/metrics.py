@@ -58,10 +58,14 @@ def reconstruction_metrics(
     if output.reconstruction is None:
         raise ValueError("Model output does not include reconstruction predictions")
 
-    targets = batch["targets"]
+    targets = output.loss_targets if getattr(output, "loss_targets", None) is not None else batch["targets"]
     valid_mask = batch.get("valid_mask")
-    if valid_mask is None:
+    if getattr(output, "loss_valid_mask", None) is not None:
+        valid_mask = output.loss_valid_mask
+    elif valid_mask is None:
         valid_mask = torch.ones(targets.shape[:2], dtype=torch.bool, device=targets.device)
+    elif valid_mask.shape[:2] != targets.shape[:2]:
+        valid_mask = valid_mask[:, : targets.shape[1]]
     else:
         valid_mask = valid_mask.to(device=targets.device, dtype=torch.bool)
 

@@ -73,13 +73,23 @@ python scripts/sketchformer/export.py \
   --output weights/finetuned/sketchformer-tok-dict-anime/export.pt
 ```
 
-Prepare for TensorFlow checkpoint conversion:
+Export the released tok-dict dictionary centers for checkpoint-compatible data:
 
 ```bash
+python -m prep_data.sketch_token.create_token_dict \
+  --source-token-dict-pkl sketchformer/prep_data/sketch_token/token_dict.pkl \
+  --output-dir data/processed/sketch_token
+```
+
+Convert the released tok-dict TensorFlow checkpoint:
+
+```bash
+unzip weights/pretrained/sketch-transformer-tf2-cvpr_tform_tok_dict.zip -d weights/pretrained
+
 python scripts/sketchformer/convert_checkpoint.py \
-  --source weights/pretrained/sketch-transformer-tf2-cvpr_tform_cont/weights/ckpt-12 \
-  --output weights/pretrained/sketchformer_continuous.safetensors \
-  --dry-run
+  --experiment anime_tok_dict_finetune \
+  --source weights/pretrained/sketch-transformer-tf2-cvpr_tform_tok_dict/weights/ckpt-12 \
+  --output weights/pretrained/sketchformer_tok_dict_init.safetensors
 ```
 
 ## Acceptance Criteria

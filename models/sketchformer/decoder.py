@@ -13,20 +13,38 @@ from models.sketchformer.encoder import FeedForward, SDPAAttention
 class LatentExpander(nn.Module):
     """Expand a pooled latent vector into decoder memory states."""
 
-    def __init__(self, latent_dim: int, d_model: int, max_length: int) -> None:
+    def __init__(
+        self,
+        latent_dim: int,
+        d_model: int,
+        max_length: int,
+        *,
+        mode: str = "projected_position",
+    ) -> None:
         super().__init__()
-        self.latent_projection = nn.Linear(latent_dim, d_model)
-        self.position = nn.Embedding(max_length, d_model)
+        self.mode = mode
         self.max_length = int(max_length)
+        self.output_dim = d_model if mode == "projected_position" else latent_dim
+        if mode == "projected_position":
+            self.latent_projection = nn.Linear(latent_dim, d_model)
+            self.position = nn.Embedding(max_length, d_model)
+        elif mode == "tf_dense":
+            self.expand_layer = nn.Linear(1, max_length)
+        else:
+            raise ValueError("mode must be one of: projected_position, tf_dense")
 
     def forward(self, latent: torch.Tensor, sequence_length: int) -> torch.Tensor:
         if sequence_length > self.max_length:
             raise ValueError(
                 f"Sequence length {sequence_length} exceeds latent expander capacity {self.max_length}"
             )
-        positions = torch.arange(sequence_length, device=latent.device)
-        memory = self.latent_projection(latent).unsqueeze(1)
-        return memory + self.position(positions).unsqueeze(0)
+        if self.mode == "projected_position":
+            positions = torch.arange(sequence_length, device=latent.device)
+            memory = self.latent_projection(latent).unsqueeze(1)
+            return memory + self.position(positions).unsqueeze(0)
+
+        expanded = self.expand_layer(latent.unsqueeze(2)).transpose(1, 2)
+        return expanded[:, :sequence_length, :]
 
 
 class DecoderBlock(nn.Module):
@@ -35,17 +53,24 @@ class DecoderBlock(nn.Module):
     def __init__(self, config: SketchformerConfig) -> None:
         super().__init__()
         self.norm_first = config.norm_first
+        memory_dim = config.pool_output_dim if config.latent_expander_mode == "tf_dense" else config.d_model
         self.self_attn = SDPAAttention(config.d_model, config.num_heads, config.dropout)
-        self.cross_attn = SDPAAttention(config.d_model, config.num_heads, config.dropout)
+        self.cross_attn = SDPAAttention(
+            config.d_model,
+            config.num_heads,
+            config.dropout,
+            key_dim=memory_dim,
+            value_dim=memory_dim,
+        )
         self.ffn = FeedForward(
             config.d_model,
             config.dim_feedforward,
             config.dropout,
             config.activation,
         )
-        self.norm1 = nn.LayerNorm(config.d_model)
-        self.norm2 = nn.LayerNorm(config.d_model)
-        self.norm3 = nn.LayerNorm(config.d_model)
+        self.norm1 = nn.LayerNorm(config.d_model, eps=config.layer_norm_eps)
+        self.norm2 = nn.LayerNorm(config.d_model, eps=config.layer_norm_eps)
+        self.norm3 = nn.LayerNorm(config.d_model, eps=config.layer_norm_eps)
         self.dropout1 = nn.Dropout(config.dropout)
         self.dropout2 = nn.Dropout(config.dropout)
         self.dropout3 = nn.Dropout(config.dropout)
@@ -85,7 +110,11 @@ class StrokeDecoder(nn.Module):
         self.layers = nn.ModuleList(
             [DecoderBlock(config) for _ in range(config.num_decoder_layers)]
         )
-        self.final_norm = nn.LayerNorm(config.d_model)
+        self.final_norm = (
+            nn.LayerNorm(config.d_model, eps=config.layer_norm_eps)
+            if config.use_final_norm
+            else nn.Identity()
+        )
 
     def forward(
         self,

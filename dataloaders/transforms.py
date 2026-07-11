@@ -152,11 +152,20 @@ class TokenSequenceTransform:
     split: str
     max_length: int | None = None
     truncate_long_sequences: bool = True
+    add_start_token: bool = True
     add_end_token: bool = True
+    sos_token_id: int | None = None
+    sep_token_id: int | None = None
     eos_token_id: int | None = None
 
     def __call__(self, sample: dict[str, Any]) -> dict[str, Any]:
         tokens = validate_token_sequence(sample["tokens"])
+
+        if self.add_start_token and self.sos_token_id is not None:
+            if int(tokens[0]) != int(self.sos_token_id):
+                tokens = np.concatenate(
+                    [np.asarray([self.sos_token_id], dtype=np.int64), tokens]
+                )
 
         if self.add_end_token and self.eos_token_id is not None:
             if int(tokens[-1]) != int(self.eos_token_id):
@@ -171,7 +180,10 @@ class TokenSequenceTransform:
                 )
             tokens = np.array(tokens[: self.max_length], copy=True, dtype=np.int64)
             if self.add_end_token and self.eos_token_id is not None:
-                tokens[-1] = int(self.eos_token_id)
+                if len(tokens) > 1 and self.sep_token_id is not None:
+                    tokens[-2:] = [int(self.sep_token_id), int(self.eos_token_id)]
+                else:
+                    tokens[-1] = int(self.eos_token_id)
 
         transformed = dict(sample)
         transformed["tokens"] = tokens.astype(np.int64, copy=False)

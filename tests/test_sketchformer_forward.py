@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
 
 import torch
 
@@ -61,20 +62,29 @@ class SketchformerForwardTest(unittest.TestCase):
             max_seq_len=16,
             token_dictionary=TokenDictionaryConfig(
                 codebook_size=4,
-                sep_token_id=4,
-                eos_token_id=5,
-                pad_token_id=6,
-                vocab_size=7,
+                motion_token_offset=1,
+                pad_token_id=0,
+                sep_token_id=5,
+                sos_token_id=6,
+                eos_token_id=7,
+                vocab_size=8,
             ),
             d_model=16,
-            latent_dim=8,
+            latent_dim=16,
+            pool_hidden_dim=8,
+            pooling_mode="tf_self_attn_v1",
+            latent_expander_mode="tf_dense",
             num_encoder_layers=1,
             num_decoder_layers=1,
             num_heads=2,
             dim_feedforward=32,
             dropout=0.0,
+            activation="relu",
+            norm_first=False,
+            use_final_norm=False,
             gradient_checkpointing=False,
-            positional_encoding=PositionalEncodingConfig(max_length=16),
+            positional_encoding=PositionalEncodingConfig(type="sinusoidal", max_length=16),
+            decoder_autoregressive=True,
             reconstruction=ReconstructionHeadConfig(
                 enabled=True,
                 target="tok_dict",
@@ -85,19 +95,25 @@ class SketchformerForwardTest(unittest.TestCase):
 
         tokens = torch.tensor(
             [
-                [0, 1, 4, 5, 6, 6],
-                [2, 4, 3, 5, 6, 6],
+                [6, 1, 5, 7, 0, 0],
+                [6, 2, 5, 3, 7, 0],
             ],
             dtype=torch.long,
         )
-        masks = build_sequence_masks([4, 4], max_length=6)
-        with torch.no_grad():
+        masks = build_sequence_masks([4, 5], max_length=6)
+        with patch.object(
+            model.latent_expander,
+            "forward",
+            wraps=model.latent_expander.forward,
+        ) as expand_forward, torch.no_grad():
             output = model({"tokens": tokens, "targets": tokens.clone(), **masks})
 
-        self.assertEqual(output.embedding.shape, (2, 8))
+        self.assertEqual(output.embedding.shape, (2, 16))
         self.assertIsNotNone(output.reconstruction)
         assert output.reconstruction is not None
-        self.assertEqual(output.reconstruction.token_logits.shape, (2, 6, 7))
+        self.assertEqual(output.reconstruction.token_logits.shape, (2, 5, 8))
+        self.assertEqual(expand_forward.call_args.args[1], 16)
+        self.assertEqual(output.loss_targets.shape, (2, 5))
         self.assertIsNone(output.class_logits)
 
 

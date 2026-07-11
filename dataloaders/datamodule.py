@@ -155,7 +155,14 @@ class StrokeSequenceDataModule:
                 truncate_long_sequences=bool(
                     _get(self.config, "sequence.truncate_long_sequences", True)
                 ),
+                add_start_token=bool(_get(self.config, "sequence.add_start_token", True)),
                 add_end_token=bool(_get(self.config, "sequence.add_end_token", True)),
+                sos_token_id=int(
+                    _get(self.config, "format.token_dictionary.sos_token_id")
+                ),
+                sep_token_id=int(
+                    _get(self.config, "format.token_dictionary.sep_token_id")
+                ),
                 eos_token_id=int(
                     _get(self.config, "format.token_dictionary.eos_token_id")
                 ),
@@ -205,6 +212,17 @@ class StrokeSequenceDataModule:
                 pad_token_id=int(
                     _get(self.config, "format.token_dictionary.pad_token_id")
                 ),
+                sep_token_id=int(
+                    _get(self.config, "format.token_dictionary.sep_token_id")
+                ),
+                sos_token_id=int(
+                    _get(self.config, "format.token_dictionary.sos_token_id")
+                ),
+                eos_token_id=int(
+                    _get(self.config, "format.token_dictionary.eos_token_id")
+                ),
+                add_start_token=bool(_get(self.config, "sequence.add_start_token", True)),
+                add_end_token=bool(_get(self.config, "sequence.add_end_token", True)),
                 pad_to_multiple_of=int(_get(self.config, "sequence.pad_to_multiple_of", 8)),
                 causal_attention=False,
                 build_attention_mask=bool(

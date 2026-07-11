@@ -148,7 +148,17 @@ Vectorize, order, time, and export stroke-5 sketches:
 tts-run-pipeline
 ```
 
-Build the sketch token dictionary from stroke-5 deltas:
+For checkpoint-compatible tok-dict fine-tuning, export the released
+Sketchformer dictionary into the native codebook location:
+
+```bash
+tts-create-sketch-token-dict \
+  --source-token-dict-pkl sketchformer/prep_data/sketch_token/token_dict.pkl \
+  --output-dir data/processed/sketch_token
+```
+
+For from-scratch native training only, a new anime-specific dictionary can be
+built from stroke-5 deltas:
 
 ```bash
 tts-create-sketch-token-dict \
@@ -331,15 +341,29 @@ Stroke-5:
 Tok-dict:
 
 ```text
-0..K-1 = codebook motion tokens
-K      = stroke separator token
-K + 1  = end-of-sketch token
-K + 2  = padding token
+0      = padding token
+1..K   = codebook motion tokens
+K + 1  = stroke separator token
+K + 2  = start-of-sketch token
+K + 3  = end-of-sketch token
 ```
 
-The native model consumes tok-dict token sequences by default. Continuous
-stroke3 remains available through `anime_stroke3` and
-`sketchformer_continuous` for compatibility checks.
+The native tok-dict checkpoint path uses the same token ID layout as the
+released TensorFlow Sketchformer dictionary checkpoint. Continuous stroke3
+remains available through `anime_stroke3` and `sketchformer_continuous` for
+compatibility checks.
+
+Convert the released tok-dict TensorFlow checkpoint after extracting the
+archive:
+
+```bash
+unzip weights/pretrained/sketch-transformer-tf2-cvpr_tform_tok_dict.zip -d weights/pretrained
+
+tts-convert-sketchformer-checkpoint \
+  --experiment anime_tok_dict_finetune \
+  --source weights/pretrained/sketch-transformer-tf2-cvpr_tform_tok_dict/weights/ckpt-12 \
+  --output weights/pretrained/sketchformer_tok_dict_init.safetensors
+```
 
 ## Verification
 
@@ -355,8 +379,9 @@ validate config composition without launching full training.
 
 ## Known Gaps
 
-- TensorFlow-to-PyTorch Sketchformer checkpoint conversion targets the legacy
-  continuous checkpoint path, not the tok-dict objective.
+- TensorFlow must be installed in the conversion environment to read original
+  checkpoint shards. The local PyTorch training environment does not need
+  TensorFlow after conversion.
 - The native model is tok-dict reconstruction-first; text prompt conditioning is
   not wired into the architecture yet.
 - The legacy Docker image is CPU-oriented and intentionally conservative.

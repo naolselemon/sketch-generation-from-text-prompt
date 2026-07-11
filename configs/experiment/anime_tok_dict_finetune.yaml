@@ -7,8 +7,8 @@ run:
   resume_from_checkpoint: null
 
 pretrained:
-  use_converted_sketchformer_weights: false
-  path: null
+  use_converted_sketchformer_weights: true
+  path: weights/pretrained/sketchformer_tok_dict_init.safetensors
   strict: false
 
 overrides:
