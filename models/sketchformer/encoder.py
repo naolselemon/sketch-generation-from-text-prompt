@@ -53,19 +53,72 @@ class SDPAAttention(nn.Module):
         key: torch.Tensor,
         value: torch.Tensor,
         attention_mask: torch.Tensor | None = None,
+        *,
+        is_causal: bool = False,
     ) -> torch.Tensor:
         batch_size = query.shape[0]
 
         q = self._split_heads(self.q_proj(query), batch_size)
-        k = self._split_heads(self.k_proj(key), batch_size)
-        v = self._split_heads(self.v_proj(value), batch_size)
+        k, v = self.project_key_value(key, value)
+        return self._attend(query, q, k, v, attention_mask, is_causal=is_causal)
 
+    def project_key_value(
+        self,
+        key: torch.Tensor,
+        value: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Project reusable key/value states for cached decoding."""
+
+        batch_size = key.shape[0]
+        return (
+            self._split_heads(self.k_proj(key), batch_size),
+            self._split_heads(self.v_proj(value), batch_size),
+        )
+
+    def forward_cached(
+        self,
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        *,
+        cache: tuple[torch.Tensor, torch.Tensor] | None = None,
+        static_key_value: bool = False,
+        attention_mask: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
+        """Attend one or more new queries and return projected key/value cache."""
+
+        batch_size = query.shape[0]
+        q = self._split_heads(self.q_proj(query), batch_size)
+        if static_key_value and cache is not None:
+            k, v = cache
+        else:
+            new_k, new_v = self.project_key_value(key, value)
+            if cache is not None and not static_key_value:
+                k = torch.cat((cache[0], new_k), dim=2)
+                v = torch.cat((cache[1], new_v), dim=2)
+            else:
+                k, v = new_k, new_v
+        output = self._attend(query, q, k, v, attention_mask, is_causal=False)
+        return output, (k, v)
+
+    def _attend(
+        self,
+        query: torch.Tensor,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        attention_mask: torch.Tensor | None,
+        *,
+        is_causal: bool,
+    ) -> torch.Tensor:
+        batch_size = query.shape[0]
         attended = F.scaled_dot_product_attention(
             q,
             k,
             v,
             attn_mask=attention_mask,
             dropout_p=self.dropout if self.training else 0.0,
+            is_causal=is_causal,
         )
         attended = attended.transpose(1, 2).contiguous()
         attended = attended.view(batch_size, query.shape[1], self.d_model)

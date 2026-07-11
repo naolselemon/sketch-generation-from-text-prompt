@@ -7,7 +7,8 @@ Three ordering strategies are provided:
 
     order_directional_bias(strokes)      – top-left → bottom-right (default)
     order_greedy_nearest_neighbor(strokes) – minimise pen-travel greedily
-    order_tsp(strokes)                   – global TSP minimisation via python-tsp
+    order_tsp(strokes)                   – global TSP approximation via NetworkX
+    order_continuity_greedy(strokes)     – join centerline branches smoothly
 
 All functions accept and return ``list[list[tuple[int, int]]]`` — a list of
 strokes, where each stroke is an ordered list of (x, y) pixel coordinates.
@@ -17,8 +18,8 @@ from __future__ import annotations
 
 import math
 
+import networkx as nx
 import numpy as np
-from python_tsp.heuristics import solve_tsp_local_search
 
 
 
@@ -27,6 +28,89 @@ from python_tsp.heuristics import solve_tsp_local_search
 
 def _dist(pt1: tuple, pt2: tuple) -> float:
     return math.hypot(pt1[0] - pt2[0], pt1[1] - pt2[1])
+
+
+def _turn_cost(previous: tuple, junction: tuple, following: tuple) -> float:
+    """Return zero for straight continuation and two for a full reversal."""
+
+    incoming = np.asarray(junction, dtype=float) - np.asarray(previous, dtype=float)
+    outgoing = np.asarray(following, dtype=float) - np.asarray(junction, dtype=float)
+    denominator = float(np.linalg.norm(incoming) * np.linalg.norm(outgoing))
+    if denominator == 0:
+        return 1.0
+    cosine = float(np.clip(np.dot(incoming, outgoing) / denominator, -1.0, 1.0))
+    return 1.0 - cosine
+
+
+def order_continuity_greedy(
+    strokes: list[list[tuple[int, int]]],
+    *,
+    junction_tolerance: float = 2.0,
+) -> list[list[tuple[int, int]]]:
+    """Join skeleton branches through junctions while preserving smooth direction.
+
+    Skan returns graph branches between endpoints and junctions. This routine
+    pairs the smoothest continuation at a shared junction, then orders the
+    remaining strokes by nearest endpoint. T/Y branches remain separate once
+    the main continuation has consumed the junction.
+    """
+
+    remaining = [list(stroke) for stroke in strokes if len(stroke) >= 2]
+    if not remaining:
+        return []
+
+    remaining.sort(
+        key=lambda stroke: (
+            -len(stroke),
+            min(point[1] for point in stroke),
+            min(point[0] for point in stroke),
+        )
+    )
+    ordered: list[list[tuple[int, int]]] = []
+
+    while remaining:
+        active = remaining.pop(0)
+        if (active[-1][1], active[-1][0]) < (active[0][1], active[0][0]):
+            active.reverse()
+
+        while remaining:
+            best: tuple[float, int, bool] | None = None
+            for index, candidate in enumerate(remaining):
+                for reverse in (False, True):
+                    oriented = candidate[::-1] if reverse else candidate
+                    distance = _dist(active[-1], oriented[0])
+                    if distance > junction_tolerance:
+                        continue
+                    turn = _turn_cost(active[-2], active[-1], oriented[1])
+                    score = turn * 10.0 + distance
+                    proposal = (score, index, reverse)
+                    if best is None or proposal < best:
+                        best = proposal
+
+            if best is None:
+                break
+            _, index, reverse = best
+            candidate = remaining.pop(index)
+            if reverse:
+                candidate.reverse()
+            if candidate[0] == active[-1]:
+                active.extend(candidate[1:])
+            else:
+                active.extend(candidate)
+
+        ordered.append(active)
+        if remaining:
+            current_end = active[-1]
+            remaining.sort(
+                key=lambda stroke: min(
+                    _dist(current_end, stroke[0]),
+                    _dist(current_end, stroke[-1]),
+                )
+            )
+            if _dist(current_end, remaining[0][-1]) < _dist(current_end, remaining[0][0]):
+                remaining[0].reverse()
+
+    return ordered
 
 
 # Strategy A – Directional Bias (default)
@@ -117,12 +201,11 @@ def order_tsp(
         for s in strokes
     ]
 
-    dist_matrix = np.zeros((n, n))
-    for i in range(n):
-        for j in range(n):
-            dist_matrix[i, j] = _dist(centers[i], centers[j])
-
-    tour, _ = solve_tsp_local_search(dist_matrix)
+    graph = nx.complete_graph(n)
+    for i, j in graph.edges:
+        graph[i][j]["weight"] = _dist(centers[i], centers[j])
+    cycle = nx.approximation.greedy_tsp(graph, source=0, weight="weight")
+    tour = cycle[:-1] if len(cycle) > 1 and cycle[0] == cycle[-1] else cycle
     ordered = [strokes[i] for i in tour]
 
     # Orient each stroke to minimise pen-lift from previous stroke end.

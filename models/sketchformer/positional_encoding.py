@@ -21,15 +21,17 @@ class SinusoidalPositionalEncoding(nn.Module):
         encoding[:, 1::2] = torch.cos(angles[:, 1::2])
         self.register_buffer("encoding", encoding, persistent=False)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, *, offset: int = 0) -> torch.Tensor:
         if x.ndim != 3:
             raise ValueError("Expected input shape (batch, sequence, channels)")
         sequence_length = x.shape[1]
-        if sequence_length > self.max_length:
+        if offset < 0 or offset + sequence_length > self.max_length:
             raise ValueError(
-                f"Sequence length {sequence_length} exceeds positional capacity {self.max_length}"
+                f"Position range [{offset}, {offset + sequence_length}) exceeds "
+                f"capacity {self.max_length}"
             )
-        return x + self.encoding[:sequence_length].to(dtype=x.dtype, device=x.device).unsqueeze(0)
+        positions = self.encoding[offset : offset + sequence_length]
+        return x + positions.to(dtype=x.dtype, device=x.device).unsqueeze(0)
 
 
 class LearnedPositionalEncoding(nn.Module):
@@ -40,15 +42,16 @@ class LearnedPositionalEncoding(nn.Module):
         self.max_length = int(max_length)
         self.embedding = nn.Embedding(self.max_length, d_model)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, *, offset: int = 0) -> torch.Tensor:
         if x.ndim != 3:
             raise ValueError("Expected input shape (batch, sequence, channels)")
         sequence_length = x.shape[1]
-        if sequence_length > self.max_length:
+        if offset < 0 or offset + sequence_length > self.max_length:
             raise ValueError(
-                f"Sequence length {sequence_length} exceeds positional capacity {self.max_length}"
+                f"Position range [{offset}, {offset + sequence_length}) exceeds "
+                f"capacity {self.max_length}"
             )
-        positions = torch.arange(sequence_length, device=x.device)
+        positions = torch.arange(offset, offset + sequence_length, device=x.device)
         return x + self.embedding(positions).unsqueeze(0)
 
 

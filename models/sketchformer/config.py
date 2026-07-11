@@ -157,6 +157,7 @@ class SketchformerConfig:
     pooling_mode: str = "projected"
     pool_hidden_dim: int = 256
     latent_expander_mode: str = "projected_position"
+    latent_expander_base_length: int | None = None
     pen_embedding_dim: int = 32
     combine_method: str = "add"
     positional_encoding: PositionalEncodingConfig = field(
@@ -214,6 +215,11 @@ class SketchformerConfig:
             ),
             latent_expander_mode=str(
                 _get(architecture, "latent_expander_mode", "projected_position")
+            ),
+            latent_expander_base_length=(
+                int(architecture["latent_expander_base_length"])
+                if architecture.get("latent_expander_base_length") is not None
+                else None
             ),
             pen_embedding_dim=int(_get(embedding, "pen_embedding_dim", 32)),
             combine_method=str(_get(embedding, "combine_method", "add")),
@@ -278,6 +284,11 @@ class SketchformerConfig:
             raise ValueError("pooling_mode must be one of: projected, tf_self_attn_v1")
         if self.latent_expander_mode not in {"projected_position", "tf_dense"}:
             raise ValueError("latent_expander_mode must be one of: projected_position, tf_dense")
+        if self.latent_expander_base_length is not None:
+            if self.latent_expander_base_length <= 0:
+                raise ValueError("latent_expander_base_length must be positive")
+            if self.latent_expander_base_length > self.max_seq_len:
+                raise ValueError("latent_expander_base_length exceeds max_seq_len")
 
     @property
     def pool_output_dim(self) -> int:

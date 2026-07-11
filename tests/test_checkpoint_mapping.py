@@ -53,6 +53,8 @@ class CheckpointMappingTest(unittest.TestCase):
             "pool.V_attn": torch.zeros(6, 1),
             "latent_expander.expand_layer.weight": torch.zeros(8, 1),
             "latent_expander.expand_layer.bias": torch.zeros(8),
+            "latent_expander.long_weight": torch.zeros(16, 1),
+            "latent_expander.long_bias": torch.zeros(16),
             "reconstruction_head.projection.weight": torch.zeros(8, 4),
             "reconstruction_head.projection.bias": torch.zeros(8),
         }
@@ -81,6 +83,10 @@ class CheckpointMappingTest(unittest.TestCase):
         self.assertIn("input_embedding.token_embedding.weight", converted)
         self.assertIn("reconstruction_head.projection.weight", converted)
         self.assertEqual(converted["latent_expander.expand_layer.weight"].shape, (8, 1))
+        self.assertEqual(report.initialized_keys, [
+            "latent_expander.long_bias",
+            "latent_expander.long_weight",
+        ])
         self.assertTrue(any("classify_layer" in key for key in report.skipped_keys))
         self.assertTrue(any("OPTIMIZER_SLOT" in key for key in report.skipped_keys))
 

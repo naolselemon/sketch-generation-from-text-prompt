@@ -96,15 +96,26 @@ def validation_step(
     )
 
 
-def average_logs(logs: list[dict[str, torch.Tensor]]) -> dict[str, torch.Tensor]:
-    """Average matching scalar log tensors across steps."""
+def average_logs(
+    logs: list[dict[str, torch.Tensor]],
+    *,
+    weight_key: str | None = None,
+) -> dict[str, torch.Tensor]:
+    """Average scalar logs, optionally weighting variable-size batches."""
 
     if not logs:
         return {}
-    keys = logs[0].keys()
+    keys = sorted({key for entry in logs for key in entry})
     averaged: dict[str, torch.Tensor] = {}
     for key in keys:
-        values = [entry[key].detach().float() for entry in logs if key in entry]
+        entries = [entry for entry in logs if key in entry]
+        values = [entry[key].detach().float() for entry in entries]
         if values:
-            averaged[key] = torch.stack(values).mean()
+            if weight_key is None or key == weight_key:
+                averaged[key] = torch.stack(values).mean()
+            else:
+                weights = torch.stack(
+                    [entry[weight_key].detach().float() for entry in entries]
+                )
+                averaged[key] = torch.sum(torch.stack(values) * weights) / weights.sum().clamp_min(1.0)
     return averaged

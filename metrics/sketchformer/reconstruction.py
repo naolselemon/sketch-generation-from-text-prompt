@@ -25,6 +25,7 @@ class ReconstructionExample:
     source_file: str
     source_index: int
     label: int | None = None
+    sample_id: str | None = None
 
 
 def prediction_to_stroke3(output: Any) -> torch.Tensor:
@@ -94,6 +95,7 @@ def collect_reconstruction_examples(
     source_files = batch.get("source_files") or [""] * targets.shape[0]
     source_indices = batch.get("source_indices")
     labels = batch.get("labels")
+    sample_ids = batch.get("sample_ids")
     if torch.is_tensor(source_indices):
         source_indices = source_indices.detach().cpu().tolist()
     if torch.is_tensor(labels):
@@ -125,6 +127,59 @@ def collect_reconstruction_examples(
                 source_file=str(source_files[row]),
                 source_index=source_index,
                 label=label,
+                sample_id=str(sample_ids[row]) if sample_ids is not None else None,
+            )
+        )
+    return examples
+
+
+def collect_generated_reconstruction_examples(
+    generation: Any,
+    batch: Mapping[str, Any],
+    *,
+    max_examples: int,
+    codebook: np.ndarray,
+) -> list[ReconstructionExample]:
+    """Collect target/free-running prediction pairs for qualitative plots."""
+
+    if max_examples <= 0:
+        return []
+    predictions = generation.tokens.detach().cpu().numpy()
+    prediction_lengths = generation.lengths.detach().cpu().tolist()
+    targets = batch["targets"].detach().cpu().numpy()
+    lengths = _batch_lengths(batch, batch.get("valid_mask"))
+    source_files = batch.get("source_files") or [""] * targets.shape[0]
+    source_indices = batch.get("source_indices")
+    labels = batch.get("labels")
+    sample_ids = batch.get("sample_ids")
+    if torch.is_tensor(source_indices):
+        source_indices = source_indices.detach().cpu().tolist()
+    if torch.is_tensor(labels):
+        labels = labels.detach().cpu().tolist()
+
+    examples: list[ReconstructionExample] = []
+    for row in range(min(max_examples, targets.shape[0])):
+        target_length = min(int(lengths[row]), targets.shape[1])
+        prediction_length = min(int(prediction_lengths[row]), predictions.shape[1])
+        target = decode_tokens(
+            np.asarray(targets[row, :target_length], dtype=np.int64),
+            codebook,
+        )
+        prediction = decode_tokens(
+            np.asarray(predictions[row, :prediction_length], dtype=np.int64),
+            codebook,
+        )
+        examples.append(
+            ReconstructionExample(
+                target=target,
+                prediction=prediction,
+                length=target_length,
+                source_file=str(source_files[row]),
+                source_index=(
+                    int(source_indices[row]) if source_indices is not None else row
+                ),
+                label=int(labels[row]) if labels is not None else None,
+                sample_id=str(sample_ids[row]) if sample_ids is not None else None,
             )
         )
     return examples

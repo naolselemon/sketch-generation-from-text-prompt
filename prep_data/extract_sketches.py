@@ -1,5 +1,5 @@
 """
-CLI entry-point: extract binary line-art sketches from raw anime images.
+CLI entry-point: extract grayscale line-art sketches from raw anime images.
 
 Options
 -------

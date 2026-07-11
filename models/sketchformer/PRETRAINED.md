@@ -42,15 +42,30 @@ Print JSON instead of a text report:
 python scripts/sketchformer/inspect_pretrained.py --json
 ```
 
-## Conversion Boundary
+## Conversion
 
-This inspection utility does not convert TensorFlow weights yet. Conversion
-belongs to:
+The tok-dict conversion is implemented in:
 
 ```text
 scripts/sketchformer/convert_checkpoint.py
 models/sketchformer/checkpoint_mapping.py
 ```
 
-This native model utility only validates the source assets those conversion
-tools will read.
+For the faithful long-sequence path, use experiment
+`anime_tok_dict_long_v2`. It preserves the released 200-position dense
+expander and initializes the separate 4096-position residual to zero, while all
+shared encoder, decoder, embedding, pooling, and reconstruction tensors are
+mapped from the TensorFlow checkpoint.
+
+After conversion, run the 200-token extension parity gate:
+
+```bash
+tts-check-sketchformer-parity \
+  --experiment anime_tok_dict_long_v2 \
+  --checkpoint weights/pretrained/sketchformer_tok_dict_4096_init.safetensors
+```
+
+The gate requires at least `0.999` flattened-logit cosine similarity and
+`0.99` token argmax agreement against the exact 200-position reference. Pass
+`--reference-npz` with `tokens` and `logits` arrays when an external TensorFlow
+reference fixture is available.

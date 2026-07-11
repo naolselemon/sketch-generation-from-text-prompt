@@ -54,12 +54,12 @@ class TokenEmbedding(nn.Module):
         )
         self.dropout = nn.Dropout(config.dropout)
 
-    def forward(self, tokens: torch.Tensor) -> torch.Tensor:
+    def forward(self, tokens: torch.Tensor, *, position_offset: int = 0) -> torch.Tensor:
         if tokens.ndim != 2:
             raise ValueError("Expected tokens with shape (batch, sequence)")
 
         x = self.token_embedding(tokens.long()) * self.scale
-        x = self.position(x)
+        x = self.position(x, offset=position_offset)
         return self.dropout(x)
 
 

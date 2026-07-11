@@ -26,6 +26,7 @@ class ConversionReport:
     converted_keys: list[str]
     skipped_keys: list[str]
     missing_target_keys: list[str]
+    initialized_keys: list[str]
 
 
 def load_torch_checkpoint(
@@ -146,6 +147,7 @@ def convert_tok_dict_tensorflow_state(
     converted: dict[str, torch.Tensor] = {}
     converted_keys: list[str] = []
     skipped_keys: list[str] = []
+    initialized_keys: list[str] = []
 
     direct: dict[str, str] = {
         "transformer/encoder/embedding/embeddings": "input_embedding.token_embedding.weight",
@@ -254,25 +256,34 @@ def convert_tok_dict_tensorflow_state(
             target_key = "latent_expander.expand_layer.weight"
             if target_key in target_state:
                 weight = tensorflow_kernel_to_linear_weight(value)
-                weight = resize_learned_position_embedding(weight, target_seq_len)
+                target_length = int(target_state[target_key].shape[0])
+                weight = resize_learned_position_embedding(weight, target_length)
                 _assign(converted, converted_keys, target_state, target_key, weight)
             continue
         if key == "transformer/expand_layer/expand_layer/bias":
             target_key = "latent_expander.expand_layer.bias"
             if target_key in target_state:
+                target_length = int(target_state[target_key].shape[0])
                 _assign(
                     converted,
                     converted_keys,
                     target_state,
                     target_key,
-                    resize_vector(value, target_seq_len),
+                    resize_vector(value, target_length),
                 )
             continue
         skipped_keys.append(raw_key)
+
+    for target_key in ("latent_expander.long_weight", "latent_expander.long_bias"):
+        if target_key in target_state and target_key not in converted:
+            converted[target_key] = torch.zeros_like(target_state[target_key])
+            converted_keys.append(target_key)
+            initialized_keys.append(target_key)
 
     missing_target_keys = sorted(key for key in target_state if key not in converted)
     return converted, ConversionReport(
         converted_keys=sorted(converted_keys),
         skipped_keys=sorted(skipped_keys),
         missing_target_keys=missing_target_keys,
+        initialized_keys=sorted(initialized_keys),
     )

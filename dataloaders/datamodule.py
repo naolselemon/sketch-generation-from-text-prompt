@@ -8,7 +8,7 @@ from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from torch.utils.data import DataLoader, Sampler
+from torch.utils.data import DataLoader, Dataset, Sampler
 
 from dataloaders.collate import Stroke3Collator, TokenSequenceCollator
 from dataloaders.stroke_sequence_dataset import StrokeSequenceDataset
@@ -92,6 +92,96 @@ class LengthBucketBatchSampler(Sampler[list[int]]):
         return [bucket for bucket in buckets if bucket]
 
 
+class TokenBudgetBatchSampler(Sampler[list[int]]):
+    """Build variable-size batches bounded by padded sequence token count."""
+
+    def __init__(
+        self,
+        lengths: Sequence[int],
+        max_tokens: int,
+        *,
+        max_batch_size: int | None = None,
+        shuffle: bool = True,
+        drop_last: bool = False,
+        seed: int = 42,
+    ) -> None:
+        if max_tokens <= 0:
+            raise ValueError("max_tokens must be positive")
+        if any(length <= 0 for length in lengths):
+            raise ValueError("sequence lengths must be positive")
+        if any(length > max_tokens for length in lengths):
+            longest = max(lengths)
+            raise ValueError(
+                f"sequence length {longest} exceeds max_tokens_per_batch={max_tokens}"
+            )
+        self.lengths = [int(length) for length in lengths]
+        self.max_tokens = int(max_tokens)
+        self.max_batch_size = int(max_batch_size) if max_batch_size else None
+        self.shuffle = bool(shuffle)
+        self.drop_last = bool(drop_last)
+        self.seed = int(seed)
+        self.epoch = 0
+
+    def __iter__(self) -> Iterator[list[int]]:
+        batches = self._build_batches(self.seed + self.epoch if self.shuffle else None)
+        self.epoch += 1
+        yield from batches
+
+    def __len__(self) -> int:
+        return len(self._build_batches(None))
+
+    def _build_batches(self, shuffle_seed: int | None) -> list[list[int]]:
+        indices = list(range(len(self.lengths)))
+        indices.sort(key=lambda index: self.lengths[index])
+
+        batches: list[list[int]] = []
+        batch: list[int] = []
+        batch_max = 0
+        for index in indices:
+            length = self.lengths[index]
+            next_max = max(batch_max, length)
+            exceeds_tokens = next_max * (len(batch) + 1) > self.max_tokens
+            exceeds_size = (
+                self.max_batch_size is not None
+                and len(batch) + 1 > self.max_batch_size
+            )
+            if batch and (exceeds_tokens or exceeds_size):
+                batches.append(batch)
+                batch = []
+                batch_max = 0
+            batch.append(index)
+            batch_max = max(batch_max, length)
+        if batch and (not self.drop_last or self.max_batch_size is None or len(batch) == self.max_batch_size):
+            batches.append(batch)
+        if shuffle_seed is not None:
+            rng = random.Random(shuffle_seed)
+            for values in batches:
+                rng.shuffle(values)
+            rng.shuffle(batches)
+        return batches
+
+
+class SequenceLengthSubset(Dataset):
+    """Read-only dataset view containing complete sequences up to a stage limit."""
+
+    def __init__(self, dataset: Dataset, lengths: Sequence[int], max_length: int) -> None:
+        self.dataset = dataset
+        self.indices = [index for index, length in enumerate(lengths) if length <= max_length]
+        self._lengths = [int(lengths[index]) for index in self.indices]
+        if not self.indices:
+            raise ValueError(f"No complete sequences fit curriculum max_length={max_length}")
+
+    def __len__(self) -> int:
+        return len(self.indices)
+
+    def __getitem__(self, item: int):
+        return self.dataset[self.indices[item]]
+
+    @property
+    def lengths(self) -> list[int]:
+        return list(self._lengths)
+
+
 class StrokeSequenceDataModule:
     """Small Lightning-compatible DataModule without requiring Lightning import."""
 
@@ -125,17 +215,31 @@ class StrokeSequenceDataModule:
         if stage in {None, "test"}:
             self.test_dataset = self._make_dataset("test")
 
-    def train_dataloader(self) -> DataLoader:
+    def train_dataloader(self, max_sequence_length: int | None = None) -> DataLoader:
         if self.train_dataset is None:
             self.setup("fit")
         assert self.train_dataset is not None
-        return self._make_loader(self.train_dataset, split="train")
+        dataset: Any = self.train_dataset
+        if max_sequence_length is not None:
+            dataset = SequenceLengthSubset(
+                self.train_dataset,
+                self.train_dataset.lengths,
+                int(max_sequence_length),
+            )
+        return self._make_loader(dataset, split="train")
 
-    def val_dataloader(self) -> DataLoader:
+    def val_dataloader(self, max_sequence_length: int | None = None) -> DataLoader:
         if self.valid_dataset is None:
             self.setup("fit")
         assert self.valid_dataset is not None
-        return self._make_loader(self.valid_dataset, split="valid")
+        dataset: Any = self.valid_dataset
+        if max_sequence_length is not None:
+            dataset = SequenceLengthSubset(
+                self.valid_dataset,
+                self.valid_dataset.lengths,
+                int(max_sequence_length),
+            )
+        return self._make_loader(dataset, split="valid")
 
     def test_dataloader(self) -> DataLoader:
         if self.test_dataset is None:
@@ -238,6 +342,34 @@ class StrokeSequenceDataModule:
                 build_attention_mask=bool(
                     _get(self.config, "sequence.build_attention_mask", True)
                 ),
+            )
+
+        max_tokens_per_batch = int(
+            _get(
+                self.config,
+                "batching.max_tokens_per_batch"
+                if is_train
+                else "batching.eval_max_tokens_per_batch",
+                _get(self.config, "batching.max_tokens_per_batch", 0),
+            )
+            or 0
+        )
+        if max_tokens_per_batch > 0:
+            batch_sampler = TokenBudgetBatchSampler(
+                dataset.lengths,
+                max_tokens=max_tokens_per_batch,
+                max_batch_size=batch_size,
+                shuffle=is_train,
+                drop_last=bool(_get(self.config, "batching.drop_last", False)) if is_train else False,
+                seed=self.seed,
+            )
+            return DataLoader(
+                dataset,
+                batch_sampler=batch_sampler,
+                num_workers=num_workers,
+                pin_memory=bool(_get(self.config, "batching.pin_memory", False)),
+                persistent_workers=persistent_workers,
+                collate_fn=collate_fn,
             )
 
         if is_train and bool(_get(self.config, "batching.bucket_by_length", False)):

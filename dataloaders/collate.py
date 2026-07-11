@@ -49,6 +49,7 @@ class Stroke3Collator:
         labels = torch.empty(len(samples), dtype=torch.long)
         source_indices = torch.empty(len(samples), dtype=torch.long)
         source_files: list[str] = []
+        sample_ids: list[str] = []
 
         for row, sample in enumerate(samples):
             sequence = np.asarray(sample["stroke3"], dtype=np.float32)
@@ -57,6 +58,7 @@ class Stroke3Collator:
             labels[row] = int(sample["label"])
             source_indices[row] = int(sample["source_index"])
             source_files.append(str(sample["source_file"]))
+            sample_ids.append(str(sample.get("sample_id", sample["source_index"])))
 
         lengths_tensor = torch.as_tensor(lengths, dtype=torch.long)
         masks = build_sequence_masks(
@@ -76,6 +78,7 @@ class Stroke3Collator:
             "labels": labels,
             "source_indices": source_indices,
             "source_files": source_files,
+            "sample_ids": sample_ids,
             **masks,
         }
 
@@ -115,6 +118,7 @@ class TokenSequenceCollator:
         labels = torch.empty(len(samples), dtype=torch.long)
         source_indices = torch.empty(len(samples), dtype=torch.long)
         source_files: list[str] = []
+        sample_ids: list[str] = []
 
         for row, sample in enumerate(samples):
             sequence = prepared[row][0]
@@ -123,6 +127,7 @@ class TokenSequenceCollator:
             labels[row] = int(sample["label"])
             source_indices[row] = int(sample["source_index"])
             source_files.append(str(sample["source_file"]))
+            sample_ids.append(str(sample.get("sample_id", sample["source_index"])))
 
         lengths_tensor = torch.as_tensor(lengths, dtype=torch.long)
         masks = build_sequence_masks(
@@ -142,6 +147,7 @@ class TokenSequenceCollator:
             "labels": labels,
             "source_indices": source_indices,
             "source_files": source_files,
+            "sample_ids": sample_ids,
             "pad_token_id": int(self.pad_token_id),
             **masks,
         }

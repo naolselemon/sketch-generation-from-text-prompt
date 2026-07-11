@@ -30,8 +30,8 @@ For that reason, the base data/model configs are long-sequence capable:
 - the smoke-test experiment overrides sequence length down to `256`;
 - attention is configured for PyTorch scaled dot-product attention with Flash
   Attention preferred when the hardware supports it;
-- the anime tok-dict data config does not build full SDPA padding masks by default, so
-  long 2048-token runs can stay on the Flash/memory-efficient attention path;
+- SDPA padding masks use broadcast key masks instead of batch-sized square
+  tensors, allowing long runs to remain on memory-efficient attention paths;
 - sparse attention is represented in config but disabled until the dense
   Flash/SDPA baseline is correct.
 
@@ -47,3 +47,21 @@ legacy compatibility, but they are not the native fine-tuning objective.
 The default trainer config uses CUDA `16-mixed` precision and TF32-friendly
 runtime settings for an RTX 3090-class server. CPU development should use the
 `smoke_test` experiment or explicit CLI overrides.
+
+## Faithful 4096-token V2
+
+`experiment/anime_tok_dict_long_v2.yaml` keeps the existing 2048-token run
+unchanged and defines the full V2 contract: separately converted weights,
+complete sequences with truncation disabled, token-budget batches, and the
+512/1024/2048/4096 length curriculum. Its dataset and checkpoint paths are
+versioned so V1 artifacts are never overwritten.
+
+The V2-specific fields are:
+
+- `data.batching.max_tokens_per_batch: 4096`
+- `trainer.training.target_tokens_per_step: 32768`
+- `model.architecture.latent_expander_base_length: 200`
+- `data.sequence.truncate_long_sequences: false`
+
+Curriculum loaders filter by complete sequence length. They never shorten an
+example to make it enter an earlier stage.

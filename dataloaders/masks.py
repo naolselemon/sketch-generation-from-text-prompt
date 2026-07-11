@@ -44,7 +44,7 @@ def make_sdpa_self_attention_mask(
     *,
     causal: bool = False,
 ) -> torch.Tensor:
-    """Build a boolean SDPA mask with shape ``(batch, 1, target, source)``.
+    """Build a broadcast SDPA key mask with shape ``(batch, 1, 1, source)``.
 
     PyTorch ``scaled_dot_product_attention`` uses True to mean the attention
     element is allowed. This is the inverse of ``nn.MultiheadAttention`` key
@@ -56,11 +56,8 @@ def make_sdpa_self_attention_mask(
     if valid_mask.ndim != 2:
         raise ValueError("valid_mask must have shape (batch, sequence)")
 
-    batch_size, sequence_length = valid_mask.shape
-    allowed = valid_mask.unsqueeze(1).expand(batch_size, sequence_length, sequence_length)
-    if causal:
-        allowed = allowed & causal_mask(sequence_length, device=valid_mask.device)
-    return allowed.unsqueeze(1).contiguous()
+    del causal  # Causality is passed to SDPA via is_causal without an LxL tensor.
+    return valid_mask[:, None, None, :].contiguous()
 
 
 def build_sequence_masks(
@@ -77,4 +74,5 @@ def build_sequence_masks(
         "valid_mask": valid_mask,
         "padding_mask": valid_to_padding_mask(valid_mask),
         "sdpa_mask": make_sdpa_self_attention_mask(valid_mask, causal=causal),
+        "is_causal": bool(causal),
     }

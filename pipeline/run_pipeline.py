@@ -11,26 +11,32 @@ from utils.paths import (
     DEFAULT_STROKE5_DIR,
     DEFAULT_SKETCH_TOKEN_DIR,
 )
-from pipeline.vectorization import DEFAULT_RDP_EPSILON
+from pipeline.vectorization import (
+    DEFAULT_MAX_GEOMETRY_ERROR,
+    DEFAULT_RDP_EPSILON,
+    THRESHOLD_PROFILES,
+    VECTORIZERS,
+)
 from pipeline.workflow import run_pipeline
 
 _BANNER = """
 ╔════════════════════════════════════════════════════════════╗
-║          Hand Simulation Pipeline — Text-to-Sketch         ║
-║ Stages: Vectorize → Order → Kinematics → Stroke5 → Tok-Dict║
+║          Faithful Sketch Pipeline V2                       ║
+║ Grayscale -> Centerline -> Stroke5 -> Released Tok-Dict    ║
 ╚════════════════════════════════════════════════════════════╝"""
 
 _ORDERING_METHODS: dict[str, str] = {
-    "1": "directional",
-    "2": "greedy",
-    "3": "tsp",
+    "1": "continuity",
+    "2": "directional",
+    "3": "greedy",
+    "4": "tsp",
 }
 _DEFAULT_ORDERING = "1"
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Run vectorization, ordering, kinematics, stroke5, and tokenization."
+        description="Run faithful centerline or legacy contour sketch preprocessing."
     )
     parser.add_argument(
         "--sketches-dir",
@@ -51,6 +57,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help=f"Output directory for sketch-token codebook files (default: {DEFAULT_SKETCH_TOKEN_DIR}).",
     )
     parser.add_argument(
+        "--token-dict-dir",
+        type=Path,
+        default=None,
+        help="Released token dictionary directory used by centerline V2.",
+    )
+    parser.add_argument(
         "--n-sketches",
         type=int,
         default=None,
@@ -63,6 +75,23 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Stroke ordering method. If omitted, prompt interactively.",
     )
     parser.add_argument(
+        "--vectorizer",
+        choices=VECTORIZERS,
+        default="centerline",
+        help="centerline is the faithful V2 path; contour retains legacy V1 behavior.",
+    )
+    parser.add_argument(
+        "--threshold-profile",
+        choices=THRESHOLD_PROFILES,
+        default="hysteresis",
+        help="Grayscale threshold profile used before centerline thinning.",
+    )
+    parser.add_argument(
+        "--extractor-name",
+        default=None,
+        help="Extractor profile recorded in the V2 manifest.",
+    )
+    parser.add_argument(
         "--rdp-epsilon",
         type=float,
         default=DEFAULT_RDP_EPSILON,
@@ -73,6 +102,29 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=int,
         default=1000,
         help="Requested K-means sketch-token codebook size (default: 1000).",
+    )
+    parser.add_argument(
+        "--max-token-length",
+        type=int,
+        default=4096,
+        help="Reject V2 sketches that cannot fit this limit without excess geometry loss.",
+    )
+    parser.add_argument(
+        "--max-geometry-error",
+        type=float,
+        default=DEFAULT_MAX_GEOMETRY_ERROR,
+        help="Maximum adaptive RDP tolerance in source-image pixels.",
+    )
+    parser.add_argument(
+        "--manifest",
+        type=Path,
+        default=None,
+        help="V2 JSONL audit manifest path.",
+    )
+    parser.add_argument(
+        "--fail-on-overlength",
+        action="store_true",
+        help="Exit unsuccessfully after writing the manifest if any sketch is overlength.",
     )
     parser.add_argument(
         "--seed",
@@ -101,17 +153,18 @@ def _prompt_int(prompt: str, default: int, lo: int = 1, hi: int = 10_000) -> int
 def _prompt_ordering() -> str:
     """Prompt the user to select a stroke-ordering method."""
     print("\nStroke-ordering method:")
-    print("  1) Directional bias [default]  — top-left → bottom-right")
-    print("  2) Greedy nearest-neighbor     — minimise pen travel locally")
-    print("  3) TSP approximation           — globally minimise pen travel")
+    print("  1) Centerline continuity [default]")
+    print("  2) Directional bias")
+    print("  3) Greedy nearest-neighbor")
+    print("  4) TSP approximation")
     while True:
         try:
-            raw = input("Choose [1/2/3, default: 1]: ").strip() or _DEFAULT_ORDERING
+            raw = input("Choose [1/2/3/4, default: 1]: ").strip() or _DEFAULT_ORDERING
         except EOFError:
             raw = _DEFAULT_ORDERING
         if raw in _ORDERING_METHODS:
             return _ORDERING_METHODS[raw]
-        print("  Invalid choice — please enter 1, 2, or 3.")
+        print("  Invalid choice; please enter 1, 2, 3, or 4.")
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -158,6 +211,14 @@ def main(argv: list[str] | None = None) -> None:
         rdp_epsilon=args.rdp_epsilon,
         codebook_K=args.codebook_k,
         seed=args.seed,
+        vectorizer=args.vectorizer,
+        threshold_profile=args.threshold_profile,
+        max_token_length=args.max_token_length,
+        max_geometry_error=args.max_geometry_error,
+        token_dict_dir=args.token_dict_dir,
+        manifest_path=args.manifest,
+        fail_on_overlength=args.fail_on_overlength,
+        extractor_name=args.extractor_name,
     )
 
     print(f"\n{'═' * 58}")

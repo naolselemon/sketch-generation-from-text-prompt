@@ -56,6 +56,14 @@ class RunPipelineCliTest(unittest.TestCase):
                 rdp_epsilon=1.0,
                 codebook_K=1000,
                 seed=42,
+                vectorizer="centerline",
+                threshold_profile="hysteresis",
+                max_token_length=4096,
+                max_geometry_error=2.0,
+                token_dict_dir=None,
+                manifest_path=None,
+                fail_on_overlength=False,
+                extractor_name=None,
             )
 
 

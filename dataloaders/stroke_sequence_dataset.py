@@ -19,6 +19,7 @@ class StrokeSampleIndex:
     file_path: Path
     local_index: int
     length: int
+    sample_id: str
 
 
 class StrokeSequenceDataset(Dataset):
@@ -63,6 +64,7 @@ class StrokeSequenceDataset(Dataset):
             "length": int(len(sequence)),
             "source_file": str(entry.file_path),
             "source_index": int(entry.local_index),
+            "sample_id": entry.sample_id,
         }
         if self.format_type in {"tok_dict", "token", "tokens"}:
             sample["tokens"] = np.asarray(sequence, dtype=np.int64)
@@ -102,11 +104,17 @@ class StrokeSequenceDataset(Dataset):
             data = self._read_npz(file_path)
             self._validate_chunk(data, file_path)
             for local_index, stroke in enumerate(data["x"]):
+                sample_id = (
+                    str(data["sample_ids"][local_index])
+                    if "sample_ids" in data
+                    else f"{file_path.stem}:{local_index}"
+                )
                 index.append(
                     StrokeSampleIndex(
                         file_path=file_path,
                         local_index=local_index,
                         length=int(len(stroke)),
+                        sample_id=sample_id,
                     )
                 )
         if not index:

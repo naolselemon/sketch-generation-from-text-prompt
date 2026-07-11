@@ -108,7 +108,7 @@ def save_reconstruction_examples(
     saved: list[Path] = []
     for index, example in enumerate(examples, start=1):
         title = (
-            f"source_index={example.source_index} "
+            f"sample={example.sample_id or example.source_index} "
             f"length={example.length} label={example.label}"
         )
         output_path = directory / f"{prefix}_{index:03d}.png"

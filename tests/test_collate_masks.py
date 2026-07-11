@@ -56,10 +56,8 @@ class CollateAndMaskTest(unittest.TestCase):
         valid_mask = torch.tensor([[True, True, True, False]])
         sdpa = make_sdpa_self_attention_mask(valid_mask, causal=True)
 
-        self.assertEqual(sdpa.shape, (1, 1, 4, 4))
-        self.assertTrue(sdpa[0, 0, 2, 0])
-        self.assertFalse(sdpa[0, 0, 0, 2])
-        self.assertFalse(sdpa[0, 0, 2, 3])
+        self.assertEqual(sdpa.shape, (1, 1, 1, 4))
+        self.assertEqual(sdpa[0, 0, 0].tolist(), [True, True, True, False])
         self.assertEqual(causal_mask(3).tolist(), [
             [True, False, False],
             [True, True, False],
@@ -102,7 +100,7 @@ class CollateAndMaskTest(unittest.TestCase):
         self.assertEqual(batch["strokes"].shape, (2, 8, 3))
         self.assertEqual(batch["targets"].shape, (2, 8, 3))
         self.assertEqual(batch["valid_mask"].sum().item(), 8)
-        self.assertEqual(batch["sdpa_mask"].shape, (2, 1, 8, 8))
+        self.assertEqual(batch["sdpa_mask"].shape, (2, 1, 1, 8))
         self.assertEqual(batch["lengths"].tolist(), [3, 5])
 
     def test_collator_can_skip_full_attention_mask_for_long_sequences(self) -> None:

@@ -15,6 +15,8 @@ tests/
   test_prepare_sketchformer_tokens.py
   test_checkpoint_mapping.py
   test_train_smoke.py
+  test_faithful_v2_preprocessing.py
+  test_long_sequence_v2.py
 ```
 
 They avoid real datasets, Docker, GPU, and large checkpoints. Temporary toy
@@ -24,6 +26,12 @@ Run all tests:
 
 ```bash
 python -B -m unittest discover -s tests
+```
+
+Run the deterministic periodic V2 eval:
+
+```bash
+python -B evals/long_sequence_v2_eval.py
 ```
 
 The `-B` flag avoids writing `__pycache__` files into the repository.

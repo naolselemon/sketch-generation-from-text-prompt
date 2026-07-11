@@ -1,4 +1,4 @@
-"""Stage 1: anime image to binary line-art sketch extraction."""
+"""Stage 1: anime image to grayscale line-art extraction."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ class SketchExtractor(Protocol):
     name: str
 
     def extract(self, src: Path) -> Image.Image:
-        """Extract a binary sketch from *src*."""
+        """Extract an 8-bit grayscale sketch from *src*."""
 
 
 def collect_images(
@@ -110,7 +110,7 @@ class ControlNetLineartAnimeExtractor:
                 image_resolution=self.image_resolution,
             )
 
-        return _to_binary_grayscale(detected)
+        return _to_grayscale(detected)
 
 
 class Anime2SketchExtractor:
@@ -192,7 +192,7 @@ class Anime2SketchExtractor:
                 output_path = candidates[0]
 
             with Image.open(output_path) as image:
-                return _to_binary_grayscale(image)
+                return _to_grayscale(image)
 
 
 def process_image(src: Path, dst: Path, extractor: SketchExtractor) -> bool:
@@ -221,9 +221,17 @@ def _resolve_python_executable(python_executable: str | Path | None) -> str:
     return python_text
 
 
-def _to_binary_grayscale(image_like: Any) -> Image.Image:
+def _to_grayscale(image_like: Any) -> Image.Image:
+    """Preserve line confidence for thresholding during vectorization."""
+
     image = _to_pil_image(image_like)
-    gray = ImageOps.grayscale(image)
+    return ImageOps.grayscale(image)
+
+
+def _to_binary_grayscale(image_like: Any) -> Image.Image:
+    """Compatibility helper for callers that still require legacy binary output."""
+
+    gray = _to_grayscale(image_like)
     return gray.point(lambda pixel: 0 if pixel < 128 else 255, mode="L")
 
 

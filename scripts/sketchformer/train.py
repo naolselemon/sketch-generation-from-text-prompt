@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import math
 import sys
 from contextlib import nullcontext
@@ -41,6 +42,11 @@ from scripts.sketchformer.config import (
     limited,
     parse_batch_limit,
     resolve_device,
+)
+from scripts.sketchformer.curriculum import (
+    parse_curriculum,
+    resume_epoch_for_stage,
+    set_trainable_scope,
 )
 
 
@@ -104,6 +110,14 @@ def _total_optimizer_steps(config: dict[str, Any], train_loader: Any) -> int:
     return max(1, math.ceil(batches / max(1, accumulate)) * max_epochs)
 
 
+def _divide_gradients(model: torch.nn.Module, divisor: float) -> None:
+    if divisor <= 0:
+        raise ValueError("gradient divisor must be positive")
+    for parameter in model.parameters():
+        if parameter.grad is not None:
+            parameter.grad.div_(divisor)
+
+
 @dataclass(frozen=True)
 class PrecisionRuntime:
     """Autocast and scaler settings resolved from trainer.runtime.precision."""
@@ -162,8 +176,9 @@ def _resolve_precision_runtime(
             "trainer.runtime.precision must be one of 32-true, 16-mixed, or bf16-mixed"
         )
 
-    scaler = torch.cuda.amp.GradScaler(
-        enabled=(device.type == "cuda" and effective == "16-mixed")
+    scaler = torch.amp.GradScaler(
+        "cuda",
+        enabled=(device.type == "cuda" and effective == "16-mixed"),
     )
     return PrecisionRuntime(
         requested=requested,
@@ -264,7 +279,8 @@ def _validate(
             step_logs = loss_output.as_log_dict(prefix="val")
             step_logs.update(metric_output.as_log_dict(prefix="val"))
             logs.append(step_logs)
-    return average_logs(logs)
+    weight_key = "val/valid_tokens" if logs and "val/valid_tokens" in logs[0] else None
+    return average_logs(logs, weight_key=weight_key)
 
 
 def main() -> int:
@@ -280,6 +296,10 @@ def main() -> int:
     _configure_torch_runtime(config, device)
     precision = _resolve_precision_runtime(config, device)
     checkpoint_dir = _checkpoint_dir(config)
+    curriculum_stages = parse_curriculum(
+        config["trainer"],
+        default_max_length=int(get_nested(config, "data.sequence.max_length")),
+    )
 
     if args.dry_run:
         print(f"experiment={get_nested(config, 'experiment.name')}")
@@ -289,6 +309,13 @@ def main() -> int:
         print(f"precision={precision.effective}")
         print(f"checkpoint_dir={checkpoint_dir}")
         print(f"max_epochs={get_nested(config, 'trainer.training.max_epochs')}")
+        print(
+            "curriculum="
+            + ",".join(
+                f"{stage.name}:{stage.max_length}x{stage.epochs}:{stage.trainable}"
+                for stage in curriculum_stages
+            )
+        )
         return 0
 
     datamodule = StrokeSequenceDataModule(
@@ -297,31 +324,24 @@ def main() -> int:
         seed=seed,
     )
     datamodule.setup("fit")
-    train_loader = datamodule.train_dataloader()
-    valid_loader = datamodule.val_dataloader()
-
     raw_model = build_model(config["model"])
     _load_pretrained_if_configured(raw_model, config)
     raw_model = raw_model.to(device)
     model = maybe_compile_model(raw_model, config["model"])
     loss_fn = build_loss(config["optimizer"]).to(device)
-    optimizer = build_optimizer(raw_model, config["optimizer"])
-    scheduler = build_scheduler(
-        optimizer,
-        config["optimizer"],
-        total_steps=_total_optimizer_steps(config, train_loader),
-    )
-
     resume_path = get_nested(config, "experiment.run.resume_from_checkpoint")
+    resume_result = None
     if resume_path:
         from core import load_checkpoint
 
-        load_checkpoint(
-            PROJECT_ROOT / resume_path,
+        resume_result = load_checkpoint(
+            _resolve_project_path(resume_path),
             raw_model,
-            optimizer=optimizer,
-            scheduler=scheduler,
             strict=False,
+        )
+        print(
+            f"[resume] restored epoch={resume_result.epoch} "
+            f"step={resume_result.step}"
         )
 
     checkpoint_callback = CheckpointCallback(
@@ -333,7 +353,6 @@ def main() -> int:
         save_last=bool(get_nested(config, "trainer.checkpointing.save_last", True)),
     )
 
-    max_epochs = int(get_nested(config, "trainer.training.max_epochs", 1))
     log_every = int(get_nested(config, "trainer.training.log_every_n_steps", 10))
     accumulate = max(
         1,
@@ -341,58 +360,156 @@ def main() -> int:
     )
     grad_clip = get_nested(config, "optimizer.gradient.clip_norm", None)
     limit_train = get_nested(config, "trainer.training.limit_train_batches", 1.0)
-    global_step = 0
+    target_tokens = int(
+        get_nested(config, "trainer.training.target_tokens_per_step", 0) or 0
+    )
+    early_stopping_patience = int(
+        get_nested(config, "trainer.curriculum.early_stopping_patience", 0) or 0
+    )
+    global_step = resume_result.step if resume_result is not None else 0
+    global_epoch = resume_result.epoch if resume_result is not None else 0
 
-    for epoch in range(max_epochs):
-        model.train()
-        optimizer.zero_grad(set_to_none=True)
-        train_logs = []
-        num_batches = batch_limit(train_loader, limit_train)
+    for stage_index, stage in enumerate(curriculum_stages):
+        start_stage_epoch = resume_epoch_for_stage(
+            curriculum_stages,
+            stage_index,
+            global_epoch,
+        )
+        if start_stage_epoch >= stage.epochs:
+            print(f"[curriculum] skip completed stage={stage.name}")
+            continue
+        train_loader = datamodule.train_dataloader(stage.max_length)
+        valid_loader = datamodule.val_dataloader(stage.max_length)
+        trainable_parameters = set_trainable_scope(raw_model, stage.trainable)
+        optimizer_config = copy.deepcopy(config["optimizer"])
+        if not math.isnan(stage.learning_rate):
+            optimizer_config.setdefault("optimizer", {})["lr"] = stage.learning_rate
+        optimizer = build_optimizer(raw_model, optimizer_config)
+        if target_tokens > 0:
+            dataset_tokens = sum(int(length) for length in train_loader.dataset.lengths)
+            total_steps = max(1, math.ceil(dataset_tokens / target_tokens) * stage.epochs)
+        else:
+            stage_config = copy.deepcopy(config)
+            stage_config["trainer"]["training"]["max_epochs"] = stage.epochs
+            total_steps = _total_optimizer_steps(stage_config, train_loader)
+        scheduler = build_scheduler(
+            optimizer,
+            optimizer_config,
+            total_steps=total_steps,
+        )
+        if resume_path and start_stage_epoch > 0:
+            from core import load_checkpoint
 
-        for batch_index, batch in enumerate(limited(train_loader, limit_train)):
-            batch = move_to_device(batch, device)
-            with _autocast_context(device, precision):
-                output = model(batch)
-                loss_output = loss_fn(output, batch)
-                scaled_loss = loss_output.total / accumulate
-
-            precision.scaler.scale(scaled_loss).backward()
-            train_logs.append(loss_output.as_log_dict(prefix="train"))
-
-            should_step = (
-                (batch_index + 1) % accumulate == 0
-                or (batch_index + 1) == num_batches
+            load_checkpoint(
+                _resolve_project_path(resume_path),
+                raw_model,
+                optimizer=optimizer,
+                scheduler=scheduler,
+                strict=False,
             )
-            if should_step:
-                if grad_clip is not None:
-                    precision.scaler.unscale_(optimizer)
-                    torch.nn.utils.clip_grad_norm_(raw_model.parameters(), float(grad_clip))
-                precision.scaler.step(optimizer)
-                precision.scaler.update()
-                if scheduler.scheduler is not None:
-                    scheduler.scheduler.step()
-                optimizer.zero_grad(set_to_none=True)
-                global_step += 1
-
-            if (batch_index + 1) % log_every == 0:
-                print(
-                    f"epoch={epoch + 1} batch={batch_index + 1} "
-                    f"{format_logs(train_logs[-1])}"
-                )
-
-        train_epoch_logs = average_logs(train_logs)
-        val_logs = _validate(model, valid_loader, loss_fn, config, device, precision)
-        checkpoint_callback.on_validation_end(
-            raw_model,
-            optimizer=optimizer,
-            scheduler=scheduler,
-            epoch=epoch + 1,
-            step=global_step,
-            metrics={key: float(value.detach().cpu()) for key, value in val_logs.items()},
+        checkpoint_callback.tracker.best = (
+            float(resume_result.metrics[checkpoint_callback.monitor])
+            if resume_result is not None
+            and start_stage_epoch > 0
+            and checkpoint_callback.monitor in resume_result.metrics
+            else None
+        )
+        non_improving = 0
+        print(
+            f"[curriculum] stage={stage.name} max_length={stage.max_length} "
+            f"epochs={stage.epochs} trainable={stage.trainable} "
+            f"parameters={trainable_parameters} lr={optimizer.param_groups[0]['lr']:.8g}"
         )
 
-        print(f"epoch={epoch + 1} train {format_logs(train_epoch_logs)}")
-        print(f"epoch={epoch + 1} valid {format_logs(val_logs)}")
+        for stage_epoch in range(start_stage_epoch, stage.epochs):
+            global_epoch += 1
+            model.train()
+            optimizer.zero_grad(set_to_none=True)
+            train_logs = []
+            num_batches = batch_limit(train_loader, limit_train)
+            accumulated_tokens = 0
+
+            for batch_index, batch in enumerate(limited(train_loader, limit_train)):
+                batch = move_to_device(batch, device)
+                with _autocast_context(device, precision):
+                    output = model(batch)
+                    loss_output = loss_fn(output, batch)
+                    batch_tokens = int(
+                        loss_output.valid_tokens.item()
+                        if loss_output.valid_tokens is not None
+                        else batch["valid_mask"].sum().item()
+                    )
+                    scaled_loss = (
+                        loss_output.total * batch_tokens
+                        if target_tokens > 0
+                        else loss_output.total / accumulate
+                    )
+
+                precision.scaler.scale(scaled_loss).backward()
+                accumulated_tokens += batch_tokens
+                train_logs.append(loss_output.as_log_dict(prefix="train"))
+
+                should_step = (
+                    (target_tokens > 0 and accumulated_tokens >= target_tokens)
+                    or (target_tokens <= 0 and (batch_index + 1) % accumulate == 0)
+                    or (batch_index + 1) == num_batches
+                )
+                if should_step:
+                    precision.scaler.unscale_(optimizer)
+                    if target_tokens > 0:
+                        _divide_gradients(raw_model, float(accumulated_tokens))
+                    if grad_clip is not None:
+                        torch.nn.utils.clip_grad_norm_(raw_model.parameters(), float(grad_clip))
+                    precision.scaler.step(optimizer)
+                    precision.scaler.update()
+                    if scheduler.scheduler is not None:
+                        scheduler.scheduler.step()
+                    optimizer.zero_grad(set_to_none=True)
+                    accumulated_tokens = 0
+                    global_step += 1
+
+                if (batch_index + 1) % log_every == 0:
+                    print(
+                        f"stage={stage.name} epoch={stage_epoch + 1} "
+                        f"batch={batch_index + 1} {format_logs(train_logs[-1])}"
+                    )
+
+            train_weight_key = (
+                "train/valid_tokens"
+                if train_logs and "train/valid_tokens" in train_logs[0]
+                else None
+            )
+            train_epoch_logs = average_logs(train_logs, weight_key=train_weight_key)
+            val_logs = _validate(model, valid_loader, loss_fn, config, device, precision)
+            saved = checkpoint_callback.on_validation_end(
+                raw_model,
+                optimizer=optimizer,
+                scheduler=scheduler,
+                epoch=global_epoch,
+                step=global_step,
+                metrics={key: float(value.detach().cpu()) for key, value in val_logs.items()},
+            )
+            non_improving = 0 if "best" in saved else non_improving + 1
+
+            print(
+                f"stage={stage.name} epoch={stage_epoch + 1} "
+                f"train {format_logs(train_epoch_logs)}"
+            )
+            print(
+                f"stage={stage.name} epoch={stage_epoch + 1} "
+                f"valid {format_logs(val_logs)}"
+            )
+            is_final_stage = stage_index == len(curriculum_stages) - 1
+            if (
+                is_final_stage
+                and early_stopping_patience > 0
+                and non_improving >= early_stopping_patience
+            ):
+                print(
+                    f"[early-stopping] stage={stage.name} "
+                    f"patience={early_stopping_patience}"
+                )
+                break
 
     return 0
 

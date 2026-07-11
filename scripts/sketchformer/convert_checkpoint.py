@@ -92,6 +92,7 @@ def main() -> int:
         print(f"converted_keys={len(report.converted_keys)}")
         print(f"skipped_keys={len(report.skipped_keys)}")
         print(f"missing_target_keys={len(report.missing_target_keys)}")
+        print(f"initialized_long_sequence_keys={len(report.initialized_keys)}")
         return 0
 
     raise SystemExit(
